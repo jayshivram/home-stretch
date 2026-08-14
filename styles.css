@@ -1,0 +1,1065 @@
+/* ---------------------------------------
+   Static tokens
+--------------------------------------- */
+:root{
+  --cream:        #f7f2e9;
+  --cream-dim:    #cfc9bd;
+  --ink:          #10131c;
+  --ink-dim:      rgba(16, 19, 28, 0.62);
+  --amber:        #f2a154;
+  --coral:        #e8613c;
+  --teal:         #4f9c8a;
+
+  --font-display: 'Fraunces', serif;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-body:    'Inter', sans-serif;
+
+  --radius-lg: 30px;
+  --radius-md: 14px;
+
+  /* Theme tokens: default (dark) values, overridden per data-theme below */
+  --text:          var(--cream);
+  --text-dim:      var(--cream-dim);
+  --card-bg:       rgba(16, 19, 28, 0.42);
+  --card-border:   rgba(247, 242, 233, 0.12);
+  --card-blur:     18px;
+  --card-shadow:   0 24px 60px -20px rgba(0, 0, 0, 0.55);
+  --line-faint:    rgba(247, 242, 233, 0.16);
+  --track-bg:      rgba(247, 242, 233, 0.14);
+  --seg-bg:        rgba(247, 242, 233, 0.08);
+  --input-bg:      rgba(247, 242, 233, 0.07);
+  --input-bg-hover:rgba(247, 242, 233, 0.12);
+  --input-border:  rgba(247, 242, 233, 0.16);
+
+  color-scheme: dark;
+}
+
+/* True black canvas: minimal lit pixels for OLED panels */
+:root[data-theme="amoled"]{
+  --card-bg:      rgba(8, 8, 8, 0.6);
+  --card-border:  rgba(255, 255, 255, 0.09);
+  --card-blur:    0px;
+  --card-shadow:  none;
+}
+
+/* Frosted daylight glass over a real time-of-day sky */
+:root[data-theme="light"]{
+  --text:           var(--ink);
+  --text-dim:       var(--ink-dim);
+  --card-bg:        rgba(255, 255, 255, 0.58);
+  --card-border:    rgba(255, 255, 255, 0.7);
+  --card-blur:      22px;
+  --card-shadow:    0 30px 70px -24px rgba(30, 44, 80, 0.35);
+  --line-faint:     rgba(16, 19, 28, 0.14);
+  --track-bg:       rgba(16, 19, 28, 0.1);
+  --seg-bg:         rgba(16, 19, 28, 0.06);
+  --input-bg:       rgba(255, 255, 255, 0.6);
+  --input-bg-hover: rgba(255, 255, 255, 0.9);
+  --input-border:   rgba(16, 19, 28, 0.12);
+
+  color-scheme: light;
+}
+
+*{ box-sizing: border-box; }
+
+html, body{
+  height: 100%;
+  margin: 0;
+}
+
+body{
+  font-family: var(--font-body);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px 64px;
+  position: relative;
+  overflow-x: hidden;
+  background: #131b2e;
+  transition: color 0.6s ease;
+}
+
+/* The sprite sheet itself never renders. */
+.sprites{ position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* ---------------------------------------
+   Sky backdrop
+--------------------------------------- */
+.sky{
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--sky-top, #131b2e) 0%, var(--sky-bottom, #1c2540) 100%);
+  transition: background 1.2s ease;
+}
+
+.sky__stars{
+  position: absolute;
+  inset: 0;
+  opacity: var(--stars-opacity, 0);
+  transition: opacity 1.2s ease;
+  background-image:
+    radial-gradient(1.5px 1.5px at 20% 30%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 65% 15%, #fff, transparent),
+    radial-gradient(1px 1px at 40% 65%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 85% 45%, #fff, transparent),
+    radial-gradient(1px 1px at 10% 80%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 75% 75%, #fff, transparent),
+    radial-gradient(1px 1px at 55% 40%, #fff, transparent),
+    radial-gradient(1px 1px at 30% 12%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 92% 22%, #fff, transparent),
+    radial-gradient(1px 1px at 48% 88%, #fff, transparent);
+  background-repeat: no-repeat;
+}
+
+/* ---------------------------------------
+   Sun and moon: light theme only, positioned by JS
+--------------------------------------- */
+.sun, .moon{
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  display: none;
+  pointer-events: none;
+  overflow: visible;
+  transition: opacity 1.4s ease, left 1s linear, top 1s linear;
+}
+:root[data-theme="light"] .sun,
+:root[data-theme="light"] .moon{
+  display: block;
+}
+
+.sun{
+  width: clamp(96px, 11vw, 168px);
+  height: auto;
+  filter: drop-shadow(0 0 34px rgba(255, 196, 92, 0.75))
+          drop-shadow(0 0 90px rgba(255, 176, 60, 0.45));
+}
+.sun use{
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: sun-spin 140s linear infinite;
+}
+
+/* Warm the sun's own palette at the low ends of the day. */
+.sun{ --sun-core: #FFD91F; --sun-ray: #FFB21D; }
+
+@keyframes sun-spin{
+  from{ transform: rotate(0deg); }
+  to{ transform: rotate(360deg); }
+}
+
+.moon{
+  width: 52px;
+  height: auto;
+  filter: drop-shadow(0 0 20px rgba(220, 230, 250, 0.5));
+}
+
+/* ---------------------------------------
+   Clouds: light theme only, continuous parallax drift
+--------------------------------------- */
+.sky__clouds{
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+:root[data-theme="light"] .sky__clouds{
+  display: block;
+}
+
+.cloud{
+  position: absolute;
+  left: -320px;
+  height: auto;
+  opacity: var(--cloud-opacity, 0.85);
+  filter: brightness(var(--cloud-brightness, 1));
+  transition: opacity 1.4s ease, filter 1.4s ease;
+  animation-name: drift;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.cloud--1{ top: 11%; width: 230px; animation-duration: 128s; animation-delay: -20s; }
+.cloud--2{ top: 24%; width: 190px; animation-duration:  98s; animation-delay: -62s; opacity: 0.75; }
+.cloud--3{ top:  6%; width: 150px; animation-duration: 164s; animation-delay: -104s; }
+.cloud--4{ top: 34%; width: 120px; animation-duration:  82s; animation-delay: -36s; opacity: 0.65; }
+.cloud--5{ top: 47%; width: 300px; animation-duration: 210s; animation-delay: -150s; opacity: 0.55; }
+
+@keyframes drift{
+  from{ transform: translateX(0); }
+  to{ transform: translateX(calc(100vw + 640px)); }
+}
+
+/* ---------------------------------------
+   Birds and planes: spawned by JS, light theme only
+--------------------------------------- */
+.sky__traffic{
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+}
+:root[data-theme="light"] .sky__traffic{
+  display: block;
+}
+
+.flyer{
+  position: absolute;
+  left: -260px;
+  animation-name: fly-across;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  will-change: transform;
+}
+
+/* The gull sprites already face the direction of travel, and they glide
+   rather than flap, so the sprite bobs on the thermals instead. */
+.bird{ width: 46px; }
+.bird svg{
+  width: 100%;
+  height: auto;
+  display: block;
+  fill: rgba(28, 32, 44, var(--bird-ink, 0.6));
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+@keyframes bob{
+  0%, 100%{ transform: translateY(0) rotate(0deg); }
+  50%     { transform: translateY(-7px) rotate(-2.5deg); }
+}
+
+.plane{ width: 108px; }
+.plane__art{
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 6px 10px rgba(30, 50, 90, 0.18));
+}
+.plane__contrail{
+  position: absolute;
+  right: 92%;
+  top: 56%;
+  width: 220px;
+  height: 5px;
+  border-radius: 5px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.7) 100%);
+  transition: opacity 1s ease;
+}
+.plane.is-night .plane__contrail{ opacity: 0.14; }
+.plane.is-night .plane__art{ filter: brightness(0.62) saturate(0.7); }
+
+.plane__lights{ display: none; }
+.plane.is-night .plane__lights{ display: block; }
+.plane__lights span{
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+}
+.plane__lights .red{ left: 4%; top: 42%; background: #ff5252; box-shadow: 0 0 6px #ff5252; animation: blink 1.2s steps(1) infinite; }
+.plane__lights .green{ right: 6%; top: 52%; background: #4dff9a; box-shadow: 0 0 6px #4dff9a; animation: blink 1.2s steps(1) infinite reverse; }
+
+@keyframes fly-across{
+  from{ transform: translate(0, 0); }
+  to{ transform: translate(calc(100vw + 420px), var(--flyer-drift, -40px)); }
+}
+@keyframes blink{
+  0%, 49%{ opacity: 1; }
+  50%, 100%{ opacity: 0.15; }
+}
+
+/* ---------------------------------------
+   Card
+--------------------------------------- */
+.card{
+  width: 100%;
+  max-width: 440px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  backdrop-filter: blur(var(--card-blur));
+  -webkit-backdrop-filter: blur(var(--card-blur));
+  border-radius: var(--radius-lg);
+  padding: 26px 30px 30px;
+  text-align: center;
+  box-shadow: var(--card-shadow);
+  transition: background 0.6s ease, border-color 0.6s ease, box-shadow 0.6s ease;
+}
+
+/* ---------------------------------------
+   Segmented toggles, shared by the theme and format switchers
+--------------------------------------- */
+.theme-toggle, .format-toggle, .meridiem{
+  display: inline-flex;
+  flex-shrink: 0;
+  background: var(--seg-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.theme-toggle{
+  display: inline-flex;
+  justify-content: center;
+}
+
+.seg-btn{
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.seg-btn:hover{ color: var(--text); }
+
+.seg-btn[aria-pressed="true"]{
+  background: var(--accent, var(--amber));
+  color: #10131c;
+}
+
+.seg-btn:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------
+   Eyebrow row
+--------------------------------------- */
+.eyebrow-row{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.eyebrow{
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------
+   Journey arc, office to home, tracks workday progress
+--------------------------------------- */
+.journey{
+  position: relative;
+  width: 100%;
+  height: 96px;
+  margin-bottom: 4px;
+}
+
+.journey__svg{
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.journey__path{
+  fill: none;
+  stroke: var(--line-faint);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.journey__fill{
+  fill: none;
+  stroke: var(--accent, var(--amber));
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 340;
+  stroke-dashoffset: 340;
+  transition: stroke-dashoffset 1s linear, stroke 1.2s ease;
+}
+
+.journey__traveler{
+  fill: var(--accent, var(--amber));
+  transition: fill 1.2s ease;
+}
+.journey__halo{
+  fill: var(--accent, var(--amber));
+  opacity: 0.22;
+  transition: fill 1.2s ease;
+  animation: pulse 2.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes pulse{
+  0%, 100%{ transform: scale(1);   opacity: 0.22; }
+  50%     { transform: scale(1.3); opacity: 0.10; }
+}
+
+/* Where lunch sits on the day, marked as a stop on the line. */
+.journey__lunch{
+  fill: none;
+  stroke: var(--accent, var(--amber));
+  stroke-width: 2;
+  opacity: 0.75;
+  transition: stroke 1.2s ease;
+}
+/* SVG elements have no `hidden` property, so visibility rides on a class. */
+.journey__lunch.is-hidden{ display: none; }
+
+/* ---------------------------------------
+   Milestones: a short flourish on crossing a quarter of the day
+--------------------------------------- */
+.card.is-milestone .status{
+  color: var(--accent, var(--amber));
+  font-weight: 500;
+}
+.card.is-milestone .journey__halo{
+  animation: burst 1.5s ease-out 3;
+}
+.card.is-milestone .timer{
+  animation: swell 1.5s ease-out 1;
+}
+.card.is-milestone .progress-fill{
+  box-shadow: 0 0 12px var(--accent, var(--amber));
+}
+
+@keyframes burst{
+  0%  { transform: scale(1);   opacity: 0.45; }
+  100%{ transform: scale(3.4); opacity: 0; }
+}
+@keyframes swell{
+  0%, 100%{ transform: scale(1); }
+  22%     { transform: scale(1.035); }
+}
+
+.journey__marker{
+  position: absolute;
+  bottom: 0;
+  color: var(--text);
+  opacity: 0.88;
+  line-height: 0;
+  transition: opacity 0.6s ease, color 0.6s ease;
+}
+.journey__marker--start{ left: -2px; }
+.journey__marker--end{ right: -2px; }
+
+.journey__icon{
+  width: 30px;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
+}
+
+/* Whichever end of the trip you are closest to reads as the live one. */
+.journey__marker--end{ opacity: 0.62; }
+.card.is-home .journey__marker--start{ opacity: 0.45; }
+.card.is-home .journey__marker--end{
+  opacity: 1;
+  color: var(--teal);
+  animation: arrive 1.8s ease-in-out infinite;
+}
+
+@keyframes arrive{
+  0%, 100%{ transform: translateY(0); }
+  50%{ transform: translateY(-4px); }
+}
+
+/* ---------------------------------------
+   Timer
+--------------------------------------- */
+.timer{
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: clamp(42px, 12vw, 60px);
+  letter-spacing: -0.02em;
+  margin: 8px 0 2px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  transition: color 0.6s ease;
+}
+
+.timer-label{
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+}
+
+.status{
+  font-size: 13.5px;
+  color: var(--text-dim);
+  margin: 0 0 20px;
+  min-height: 18px;
+}
+
+/* ---------------------------------------
+   Progress track
+--------------------------------------- */
+.progress-track{
+  height: 5px;
+  border-radius: 5px;
+  background: var(--track-bg);
+  overflow: hidden;
+  margin-bottom: 26px;
+}
+
+.progress-fill{
+  height: 100%;
+  width: 0%;
+  background: var(--accent, var(--amber));
+  border-radius: 5px;
+  transition: width 1s linear, background 1.2s ease;
+}
+
+/* ---------------------------------------
+   Schedule: hand-rolled time fields so 12h mode has a real AM/PM control
+--------------------------------------- */
+/* ---------------------------------------
+   Settings panel: everything you set once, folded away so the
+   countdown keeps the top of the card
+--------------------------------------- */
+.icon-btn{
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.35s ease;
+}
+.icon-btn svg{ width: 16px; height: 16px; display: block; }
+.icon-btn:hover{ color: var(--text); background: var(--seg-bg); }
+.icon-btn[aria-expanded="true"]{
+  color: var(--accent, var(--amber));
+  transform: rotate(60deg);
+}
+.icon-btn:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 2px;
+}
+
+/* A dim, blurred scrim behind the settings dialog. Always in the DOM;
+   opacity and pointer-events do the showing and hiding so it can fade. */
+.modal-backdrop{
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  /* A plain dim scrim, deliberately without backdrop-filter: blurring a
+     full-viewport fixed layer renders unreliably in some engines (it blurred
+     the entire composited frame, not just what sits behind it, when tested).
+     The card is hidden outright below instead, so nothing needs blurring to
+     stay legible — same result, no dependency on that feature. */
+  background: rgba(10, 14, 28, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+.modal-backdrop.is-open{
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Settings lives as its own floating dialog, not inline in the card, so
+   opening it never stretches the countdown out of place. */
+/* A fixed header row plus a separately scrolling body — not a single
+   scrolling box with a `position: sticky` header. Sticky positioning inside
+   a translucent, blurred container rendered unreliably here (the header's
+   own box overlapped the content after it instead of pushing it down), so
+   the header is kept out of the scrolling element entirely instead. */
+.panel{
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 50;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(620px, 84vh);
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  backdrop-filter: blur(var(--card-blur));
+  -webkit-backdrop-filter: blur(var(--card-blur));
+  border-radius: var(--radius-lg);
+  padding: 22px 26px 28px;
+  box-shadow: var(--card-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.95);
+  transition: opacity 0.22s ease, transform 0.22s ease, background 0.6s ease, border-color 0.6s ease;
+}
+.panel.is-open{
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+.panel[hidden]{ display: none; }
+
+.panel__header{
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+/* The only part that actually scrolls, so the header above it never moves. */
+.panel__body{
+  flex: 1 1 auto;
+  min-height: 0; /* lets a flex child shrink below its content size to scroll */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* A little breathing room between the content and the scrollbar. */
+  margin-right: -8px;
+  padding-right: 8px;
+}
+
+/* A thin, theme-coloured scrollbar instead of the default OS chrome, which
+   reads as a stray grey slab against the glass. Firefox and WebKit need
+   separate properties; there is no shorthand that covers both. */
+.panel__body{
+  scrollbar-width: thin;
+  scrollbar-color: var(--input-border) transparent;
+}
+.panel__body::-webkit-scrollbar{ width: 8px; }
+.panel__body::-webkit-scrollbar-track{ background: transparent; }
+.panel__body::-webkit-scrollbar-thumb{
+  background: var(--input-border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.panel__body::-webkit-scrollbar-thumb:hover{ background: var(--text-dim); background-clip: padding-box; }
+
+.panel__title{
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.panel__group + .panel__group{ margin-top: 20px; }
+
+.panel__label{
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.panel__row{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Keyboard shortcut list */
+.keys{
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.keys > div{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.keys dt{
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--seg-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  line-height: 1.3;
+}
+.keys dd{ margin: 0 0 0 4px; }
+
+/* The card sits directly under the dialog at the same screen position; with
+   both rendered as translucent glass, the card's own text would otherwise
+   bleed straight through the panel's background and double up with its
+   text. Hiding the card outright is simpler and more reliable than trying
+   to blur it away. */
+.card.is-settings-open{
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+/* ---------------------------------------
+   Work days
+--------------------------------------- */
+.weekdays{
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+
+.weekday{
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--seg-bg);
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.weekday:hover{ color: var(--text); border-color: var(--input-border); }
+.weekday[aria-pressed="true"]{
+  background: var(--accent, var(--amber));
+  color: #10131c;
+}
+.weekday:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 2px;
+}
+
+.sr-only{
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Two fields per row, so turning lunch on adds a row instead of squeezing. */
+.schedule{
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: center;
+  gap: 12px 14px;
+}
+
+:root[data-lunch="off"] .timefield--lunch{ display: none; }
+
+.timefield{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.timefield__label{
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding-left: 2px;
+}
+
+.timefield__box{
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-md);
+  padding: 5px 6px 5px 8px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.timefield__box:hover{ background: var(--input-bg-hover); }
+.timefield__box:focus-within{
+  background: var(--input-bg-hover);
+  border-color: var(--accent, var(--amber));
+}
+
+.timefield__num{
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 2.1ch;
+  padding: 2px 0;
+  text-align: center;
+  border-radius: 5px;
+  caret-color: var(--accent, var(--amber));
+}
+.timefield__num::selection{
+  background: var(--accent, var(--amber));
+  color: #10131c;
+}
+
+.timefield__colon{
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-dim);
+  padding-bottom: 2px;
+}
+
+.meridiem{
+  margin-left: 6px;
+  padding: 2px;
+  flex-direction: column;
+  gap: 1px;
+  border-color: transparent;
+  background: transparent;
+}
+/* 24h mode has no meridiem, so the control is removed from the layout. */
+:root[data-clock="24"] .meridiem{ display: none; }
+
+.meridiem__btn{
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--seg-bg);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 5px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.meridiem__btn:hover{ color: var(--text); }
+.meridiem__btn[aria-pressed="true"]{
+  background: var(--accent, var(--amber));
+  color: #10131c;
+}
+.meridiem__btn:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 1px;
+}
+
+.schedule-summary{
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------
+   Action row: lunch break and end-of-day reminder
+--------------------------------------- */
+.actions{
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.ghost-btn{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 12px 5px 9px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.ghost-btn svg{ width: 13px; height: 13px; display: block; }
+.ghost-btn:hover{ color: var(--text); background: var(--seg-bg); }
+.ghost-btn[aria-pressed="true"]{
+  color: var(--accent, var(--amber));
+  border-color: var(--accent, var(--amber));
+  background: transparent;
+}
+.ghost-btn:disabled{ opacity: 0.45; cursor: default; }
+.ghost-btn:disabled:hover{ color: var(--text-dim); background: transparent; }
+.ghost-btn:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 2px;
+}
+
+.actions__note{
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.actions__note[hidden]{ display: none; }
+
+/* ---------------------------------------
+   Tidbit: something to read while the clock runs down
+--------------------------------------- */
+.tidbit{
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-faint);
+  transition: border-color 0.6s ease;
+}
+.tidbit[hidden]{ display: none; }
+
+.tidbit__kicker{
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent, var(--amber));
+  transition: color 1.2s ease;
+}
+
+.tidbit__text{
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  opacity: 0.82;
+  min-height: 2.6em;
+  transition: opacity 0.32s ease;
+}
+.tidbit.is-swapping .tidbit__text{ opacity: 0; }
+
+.tidbit__actions{
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.tidbit__btn{
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.tidbit__btn svg{ width: 15px; height: 15px; display: block; }
+.tidbit__btn:hover{ color: var(--text); background: var(--seg-bg); }
+.tidbit__btn:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 1px;
+}
+
+.tidbit-show{
+  margin-top: 18px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.tidbit-show:hover{ color: var(--text); background: var(--seg-bg); }
+.tidbit-show:focus-visible{
+  outline: 2px solid var(--accent, var(--amber));
+  outline-offset: 2px;
+}
+
+.footnote{
+  position: fixed;
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  opacity: 0.7;
+  margin: 0;
+}
+
+/* ---------------------------------------
+   End-of-day states
+--------------------------------------- */
+.card.is-home .timer{
+  color: var(--teal);
+}
+
+/* Still at your desk well past going-home time. */
+.card.is-overtime .timer{
+  color: var(--coral);
+}
+.card.is-overtime .timer-label,
+.card.is-overtime .status{
+  color: var(--coral);
+  opacity: 0.85;
+}
+
+/* Nothing to count down on a day off, so the journey recedes. */
+.card.is-dayoff .journey,
+.card.is-dayoff .progress-track{
+  opacity: 0.3;
+}
+.card.is-dayoff .journey__halo{
+  animation: none;
+}
+
+/* ---------------------------------------
+   Motion and responsiveness
+--------------------------------------- */
+@media (prefers-reduced-motion: reduce){
+  .journey__fill, .progress-fill, .sky, .sky__stars, .journey__traveler,
+  .sun, .moon, .card{
+    transition: none;
+  }
+  .cloud, .flyer, .bird svg, .sun use, .journey__halo,
+  .plane__lights .red, .plane__lights .green,
+  .card.is-home .journey__marker--end,
+  .card.is-milestone .journey__halo, .card.is-milestone .timer{
+    animation: none;
+  }
+  .tidbit__text{ transition: none; }
+  .modal-backdrop, .panel{ transition: none; }
+}
+
+@media (max-width: 400px){
+  .card{ padding: 22px 18px 24px; }
+  .schedule{ gap: 8px; }
+  .timefield__num{ font-size: 15px; }
+  .sun{ width: 86px; height: 86px; }
+}
