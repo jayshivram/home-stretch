@@ -236,6 +236,20 @@
       <path fill-rule="evenodd" fill="#FFFFFF" d="M56.2,198.5h32.7c0.9,0,1.6-0.7,1.6-1.6c0-0.9-0.7-1.6-1.6-1.6H56.2c-0.9,0-1.6,0.7-1.6,1.6C54.5,197.8,55.3,198.5,56.2,198.5"/>
     </symbol>
 
+    <symbol id="icon-compress" viewBox="0 0 24 24">
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            d="M10 4v6H4M20 14h-6v6"/>
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            d="M3 3l7 7M21 21l-7-7"/>
+    </symbol>
+
+    <symbol id="icon-expand" viewBox="0 0 24 24">
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            d="M4 10V4h6M20 14v6h-6"/>
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            d="M4 4l6 6M20 20l-6-6"/>
+    </symbol>
+
     <symbol id="icon-gear" viewBox="0 0 24 24">
       <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
             d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/>
@@ -338,10 +352,17 @@
 
     <div class="eyebrow-row">
       <p class="eyebrow" id="eyebrow">Tuesday · 9:00 AM</p>
-      <button type="button" class="icon-btn" id="settingsToggle"
-              aria-expanded="false" aria-controls="settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24"><use href="#icon-gear"/></svg>
-      </button>
+      <div class="eyebrow-row__tools">
+        <button type="button" class="icon-btn" id="compactToggle"
+                aria-pressed="false" aria-label="Shrink the card">
+          <svg class="icon-shrink" viewBox="0 0 24 24"><use href="#icon-compress"/></svg>
+          <svg class="icon-grow" viewBox="0 0 24 24"><use href="#icon-expand"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="settingsToggle"
+                aria-expanded="false" aria-controls="settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><use href="#icon-gear"/></svg>
+        </button>
+      </div>
     </div>
 
     <div class="journey" aria-hidden="true">
@@ -533,6 +554,7 @@
         <dl class="keys">
           <div><dt>L</dt><dt>D</dt><dt>A</dt><dd>Light, dark, AMOLED</dd></div>
           <div><dt>H</dt><dd>Switch 12h and 24h</dd></div>
+          <div><dt>M</dt><dd>Shrink and expand the card</dd></div>
           <div><dt>Space</dt><dd>Something else to read</dd></div>
           <div><dt>S</dt><dd>Open and close this panel</dd></div>
         </dl>

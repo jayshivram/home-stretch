@@ -1955,6 +1955,28 @@
     });
   }
 
+  // ---- Compact card ----------------------------------------------------
+  // Shrinks the card to the countdown alone, which is all it needs to be once
+  // the schedule is set. It also hands the sky back most of the screen.
+  const COMPACT_KEY = 'homeStretch.compact';
+  const compactBtn = document.getElementById('compactToggle');
+
+  let compact = false;
+  try { compact = localStorage.getItem(COMPACT_KEY) === 'on'; } catch (e) { /* default open */ }
+
+  function setCompact(on, persist) {
+    compact = on;
+    els.card.classList.toggle('is-compact', on);
+    compactBtn.setAttribute('aria-pressed', String(on));
+    compactBtn.setAttribute('aria-label', on ? 'Expand the card' : 'Shrink the card');
+    if (persist !== false) {
+      try { localStorage.setItem(COMPACT_KEY, on ? 'on' : 'off'); }
+      catch (e) { /* continue without persistence */ }
+    }
+  }
+
+  compactBtn.addEventListener('click', () => setCompact(!compact));
+
   // ---- Settings panel --------------------------------------------------
   // Settings is a floating dialog over a backdrop, not content inside the
   // card, so opening it never stretches the countdown down the page.
@@ -2032,6 +2054,7 @@
       case 'a': setTheme('amoled'); break;
       case 'h': setFormat(timeFormat === '12' ? '24' : '12'); break;
       case 's': setSettingsOpen(settingsEls.panel.hidden); break;
+      case 'm': setCompact(!compact); break;
       default: return;
     }
     e.preventDefault();
@@ -2172,6 +2195,7 @@
   buildStarfield();
   buildClouds();
   buildSkyline();
+  setCompact(compact, false);
   renderWeekdays();
   renderHoursMode();
   renderLunchToggle();

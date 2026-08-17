@@ -609,6 +609,55 @@ body{
   text-overflow: ellipsis;
 }
 
+.eyebrow-row__tools{
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------
+   Compact card: the countdown and nothing else
+--------------------------------------- */
+/* Only one of the two glyphs is ever shown, so the single button reads as
+   shrink when open and grow when compact. */
+.card:not(.is-compact) .icon-grow,
+.card.is-compact .icon-shrink{ display: none; }
+
+.card.is-compact{
+  max-width: 300px;
+  padding: 18px 22px 20px;
+}
+
+/* Everything that explains, contextualises or entertains steps out; what is
+   left is the number you came for and how far along it is. */
+.card.is-compact .journey,
+.card.is-compact .status,
+.card.is-compact .week,
+.card.is-compact .schedule-summary,
+.card.is-compact .tidbit,
+.card.is-compact .tidbit-show{
+  display: none;
+}
+
+.card.is-compact .eyebrow-row{ margin-bottom: var(--space-tight); }
+.card.is-compact .eyebrow{ font-size: 10.5px; letter-spacing: 0.08em; }
+.card.is-compact .icon-btn{ width: 26px; height: 26px; }
+.card.is-compact .icon-btn svg{ width: 14px; height: 14px; }
+
+.card.is-compact .timer{
+  font-size: clamp(30px, 9vw, 42px);
+  margin: 0 0 var(--space-hair);
+}
+.card.is-compact .timer-label{
+  font-size: 13px;
+  margin-bottom: var(--space-tight);
+}
+.card.is-compact .progress-track{
+  height: 4px;
+  margin-bottom: 0;
+}
+
 /* ---------------------------------------
    Journey arc, office to home, tracks workday progress
 --------------------------------------- */
