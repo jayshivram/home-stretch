@@ -252,17 +252,28 @@ body{
 }
 :root:not([data-theme="amoled"]) .skyline{ display: block; }
 
-/* Distance is carried by haze, not just by height: the far layer sits paler
-   and bluer, the near layer close to solid. --dusk rises after sunset so the
-   city darkens into silhouette as the sky does. */
-.skyline__far path,
-.skyline__far rect{
-  fill: var(--city-far, rgba(96, 122, 160, 0.42));
+/* Distance is carried by haze: the far band sits paler and bluer, the near
+   band close to solid. --tone is set per building so neighbours separate
+   into distinct masses rather than fusing into one silhouette. */
+.skyline__far > g > path,
+.skyline__far > g > rect,
+.skyline__far > g > circle{
+  fill: var(--city-far, rgba(132, 158, 194, 0.34));
+  fill-opacity: var(--tone, 1);
   transition: fill 1.6s ease;
 }
-.skyline__near path,
-.skyline__near rect{
-  fill: var(--city-near, rgba(46, 62, 92, 0.72));
+.skyline__mid > g > path,
+.skyline__mid > g > rect,
+.skyline__mid > g > circle{
+  fill: var(--city-mid, rgba(84, 106, 148, 0.6));
+  fill-opacity: var(--tone, 1);
+  transition: fill 1.6s ease;
+}
+.skyline__near > g > path,
+.skyline__near > g > rect,
+.skyline__near > g > circle{
+  fill: var(--city-near, rgba(34, 48, 76, 0.86));
+  fill-opacity: var(--tone, 1);
   transition: fill 1.6s ease;
 }
 
@@ -272,7 +283,19 @@ body{
   opacity: calc(var(--lit, 0.6) * var(--window-glow, 0));
   transition: opacity 2.2s ease;
 }
-.skyline__far .skyline__windows rect{ opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * 0.55); }
+.skyline__far .skyline__windows rect{ opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * 0.4); }
+.skyline__mid .skyline__windows rect{ opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * 0.7); }
+
+/* Red aircraft-warning lights on the masts, which only matter after dark. */
+.skyline__beacon{
+  fill: #ff4d4d !important;
+  fill-opacity: calc(var(--window-glow, 0)) !important;
+  animation: beacon 3s steps(1) infinite;
+}
+@keyframes beacon{
+  0%, 42%{ opacity: 1; }
+  43%, 100%{ opacity: 0.08; }
+}
 
 /* ---------------------------------------
    Birds and planes: spawned by JS, light theme only

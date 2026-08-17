@@ -624,10 +624,16 @@
     { at: 0, r: 38, g: 50, b: 78, a: 0.5 },     // night: a hint of massing
     { at: 1, r: 132, g: 158, b: 194, a: 0.34 }, // day: washed out by distance
   ];
+  const cityMid = [
+    { at: 0, r: 22, g: 32, b: 56, a: 0.78 },
+    { at: 1, r: 96, g: 120, b: 158, a: 0.56 },
+  ];
   const cityNear = [
     { at: 0, r: 10, g: 15, b: 30, a: 0.92 },
     { at: 1, r: 62, g: 82, b: 116, a: 0.72 }, // daylight haze, not a night silhouette
   ];
+
+  let lastGlow = -1;
 
   function updateSkyline(ambient, darkness) {
     const mix = (stops) => {
@@ -635,9 +641,17 @@
       return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${c.a.toFixed(2)})`;
     };
     els.root.style.setProperty('--city-far', mix(cityFar));
+    els.root.style.setProperty('--city-mid', mix(cityMid));
     els.root.style.setProperty('--city-near', mix(cityNear));
+
     // Offices light up before it is fully dark, and never quite all at once.
-    els.root.style.setProperty('--window-glow', clamp(darkness * 1.25, 0, 1).toFixed(2));
+    // Thousands of windows inherit this, so it is only written when it has
+    // actually moved rather than on every tick.
+    const glow = Number(clamp(darkness * 1.25, 0, 1).toFixed(2));
+    if (glow !== lastGlow) {
+      lastGlow = glow;
+      els.root.style.setProperty('--window-glow', String(glow));
+    }
   }
 
   // ---- Birds and planes: spawned at random intervals, light theme only
@@ -788,94 +802,183 @@
   // on at dusk.
   const SVGNS = 'http://www.w3.org/2000/svg';
 
+  function el(name, attrs) {
+    const node = document.createElementNS(SVGNS, name);
+    for (const key in attrs) node.setAttribute(key, attrs[key]);
+    return node;
+  }
+
+  // Rooftop clutter is what stops a skyline reading as a bar chart, so each
+  // flat roof gets a chance at a water tank, a plant room or a lit mast.
+  function roofKit(group, x, w, y, scale) {
+    const roll = Math.random();
+    if (roll < 0.28) {
+      // Water tank on legs, the classic rooftop silhouette.
+      const tw = clamp(w * 0.22, 7, 15) * scale;
+      const tx = x + w * rand(0.2, 0.62);
+      const th = tw * 1.15;
+      group.appendChild(el('path', { d:
+        `M${tx} ${y} v${-th} l${tw / 2} ${-tw * 0.42} l${tw / 2} ${tw * 0.42} v${th} Z` }));
+      group.appendChild(el('rect', { x: tx + 1, y: y - 5, width: 2, height: 5 }));
+      group.appendChild(el('rect', { x: tx + tw - 3, y: y - 5, width: 2, height: 5 }));
+    } else if (roll < 0.55) {
+      // Plant room, sometimes two of different heights.
+      const bw = w * rand(0.2, 0.34);
+      const bx = x + w * rand(0.1, 0.5);
+      group.appendChild(el('rect', { x: bx, y: y - bw * 0.5, width: bw, height: bw * 0.5 }));
+      if (Math.random() < 0.5) {
+        const b2 = w * rand(0.12, 0.2);
+        group.appendChild(el('rect', { x: bx + bw + 3, y: y - b2 * 0.8, width: b2, height: b2 * 0.8 }));
+      }
+    } else if (roll < 0.78) {
+      const mastH = rand(16, 40) * scale;
+      const mx = x + w * rand(0.35, 0.65);
+      group.appendChild(el('rect', { x: mx, y: y - mastH, width: 2.4, height: mastH }));
+      // Aircraft warning light, which blinks once the city is lit.
+      const beacon = el('circle', { cx: mx + 1.2, cy: y - mastH, r: 2.6 });
+      beacon.setAttribute('class', 'skyline__beacon');
+      beacon.style.animationDelay = (-Math.random() * 3).toFixed(2) + 's';
+      group.appendChild(beacon);
+    }
+  }
+
+  // Windows laid out floor by floor. Scattering them at random was what made
+  // the facades look like static; real buildings light up by storey, and a
+  // floor that is working late lights nearly all of its windows at once.
+  function facade(group, x, w, y, h, spec) {
+    const inset = spec.inset;
+    const usableW = w - inset * 2;
+    const usableH = h - spec.roofGap - spec.baseGap;
+    if (usableW < spec.colW || usableH < spec.floorH) return;
+
+    const cols = Math.max(1, Math.floor(usableW / spec.colW));
+    const rows = Math.max(1, Math.floor(usableH / spec.floorH));
+    const padX = (usableW - cols * spec.colW) / 2;
+
+    const windows = el('g', {});
+    windows.setAttribute('class', 'skyline__windows');
+
+    for (let r = 0; r < rows; r++) {
+      const wy = y + spec.roofGap + r * spec.floorH;
+      // Roughly a third of floors are properly occupied.
+      const busy = Math.random() < 0.34;
+      const chance = busy ? rand(0.7, 0.95) : rand(0.05, 0.2);
+
+      if (spec.style === 'ribbon') {
+        // Continuous glazing: one band per floor, occasionally interrupted.
+        let cx = x + inset + padX;
+        while (cx < x + w - inset - 4) {
+          const runLen = Math.min(spec.colW * Math.round(rand(2, 5)), x + w - inset - cx);
+          if (Math.random() < chance) {
+            const bar = el('rect', { x: cx, y: wy, width: runLen - 2.5, height: spec.winH, rx: 0.8 });
+            bar.style.setProperty('--lit', rand(0.4, 1).toFixed(2));
+            windows.appendChild(bar);
+          }
+          cx += runLen;
+        }
+      } else {
+        for (let c = 0; c < cols; c++) {
+          if (Math.random() > chance) continue;
+          const win = el('rect', {
+            x: x + inset + padX + c * spec.colW,
+            y: wy,
+            width: spec.winW,
+            height: spec.winH,
+            rx: 0.8,
+          });
+          win.style.setProperty('--lit', rand(0.45, 1).toFixed(2));
+          windows.appendChild(win);
+        }
+      }
+    }
+    group.appendChild(windows);
+  }
+
   function buildSkyline() {
     const svg = document.getElementById('skyline');
     svg.replaceChildren();
 
+    // Three bands rather than two: the extra one gives the horizon somewhere
+    // to recede into instead of jumping straight from haze to foreground.
     const layers = [
-      { klass: 'skyline__far', y: 118, minW: 46, maxW: 96, minH: 60, maxH: 150, gap: -8, windows: 0.5, step: 26 },
-      { klass: 'skyline__near', y: 168, minW: 58, maxW: 132, minH: 70, maxH: 210, gap: -14, windows: 1, step: 22 },
+      { klass: 'skyline__far', minW: 40, maxW: 84, minH: 44, maxH: 128, gap: [-10, 10],
+        floorH: 13, colW: 11, winW: 4.5, winH: 5, inset: 6, roofGap: 10, baseGap: 4,
+        roofChance: 0.25, scale: 0.7, tone: [0.55, 0.8] },
+      { klass: 'skyline__mid', minW: 48, maxW: 104, minH: 60, maxH: 176, gap: [-16, 8],
+        floorH: 14, colW: 12, winW: 5, winH: 5.5, inset: 7, roofGap: 11, baseGap: 5,
+        roofChance: 0.5, scale: 0.85, tone: [0.7, 0.95] },
+      { klass: 'skyline__near', minW: 56, maxW: 128, minH: 76, maxH: 226, gap: [-20, 6],
+        floorH: 16, colW: 13, winW: 5.5, winH: 6.5, inset: 8, roofGap: 13, baseGap: 6,
+        roofChance: 0.72, scale: 1, tone: [0.85, 1] },
     ];
 
     for (const layer of layers) {
-      const group = document.createElementNS(SVGNS, 'g');
+      const group = el('g', {});
       group.setAttribute('class', layer.klass);
 
-      let x = -40;
+      let x = -50;
       let lastShape = '';
-      while (x < 1640) {
-        // Real skylines correlate height with slenderness: the tall things are
-        // towers, the wide things are blocks. Picking width and height
-        // independently was what produced the occasional squat slab.
+      while (x < 1650) {
+        // Height and slenderness correlate, the way real towers do.
         const tall = Math.pow(Math.random(), 1.5);
         const h = layer.minH + tall * (layer.maxH - layer.minH);
-        const w = layer.minW + (1 - tall * 0.72) * (layer.maxW - layer.minW) * rand(0.72, 1);
+        const w = layer.minW + (1 - tall * 0.7) * (layer.maxW - layer.minW) * rand(0.7, 1);
         const y = 300 - h;
 
-        // Never the same silhouette twice running.
-        const options = tall > 0.62
-          ? ['tower', 'setback', 'spire', 'crown']
+        const options = tall > 0.6
+          ? ['tower', 'setback', 'spire', 'crown', 'tower']
           : ['slab', 'block', 'crown', 'pitched'];
         let shape = pick(options);
         if (shape === lastShape) shape = pick(options.filter(s => s !== lastShape));
         lastShape = shape;
 
-        const block = document.createElementNS(SVGNS, 'path');
-        let d;
+        // Each building carries its own weight so neighbours separate instead
+        // of fusing into a single silhouette.
+        const building = el('g', {});
+        building.style.setProperty('--tone', rand(layer.tone[0], layer.tone[1]).toFixed(3));
+
+        let d, flatRoof = true;
         if (shape === 'setback') {
-          // Two stepped shoulders, art-deco fashion.
-          const i1 = w * rand(0.12, 0.2), i2 = w * rand(0.26, 0.36);
-          const s1 = y + h * rand(0.16, 0.26), s2 = y + h * rand(0.05, 0.12);
+          const i1 = w * rand(0.1, 0.18), i2 = w * rand(0.24, 0.34);
+          const s1 = y + h * rand(0.18, 0.28), s2 = y + h * rand(0.06, 0.13);
           d = `M${x} 300 V${s1} H${x + i1} V${s2} H${x + i2} V${y} H${x + w - i2} V${s2} `
             + `H${x + w - i1} V${s1} H${x + w} V300 Z`;
         } else if (shape === 'crown') {
-          // A smaller plant room set back on the roof.
-          const i = w * rand(0.24, 0.34), cap = h * rand(0.07, 0.13);
+          const i = w * rand(0.22, 0.32), cap = h * rand(0.06, 0.12);
           d = `M${x} 300 V${y + cap} H${x + i} V${y} H${x + w - i} V${y + cap} H${x + w} V300 Z`;
         } else if (shape === 'spire') {
-          const i = w * rand(0.3, 0.4);
-          d = `M${x} 300 V${y + h * 0.16} L${x + i} ${y} H${x + w - i} L${x + w} ${y + h * 0.16} V300 Z`;
+          const i = w * rand(0.28, 0.4);
+          d = `M${x} 300 V${y + h * 0.15} L${x + i} ${y} H${x + w - i} L${x + w} ${y + h * 0.15} V300 Z`;
+          flatRoof = false;
         } else if (shape === 'pitched') {
-          d = `M${x} 300 V${y + 13} L${x + w / 2} ${y} L${x + w} ${y + 13} V300 Z`;
+          d = `M${x} 300 V${y + 12} L${x + w / 2} ${y} L${x + w} ${y + 12} V300 Z`;
+          flatRoof = false;
         } else {
           d = `M${x} 300 V${y} H${x + w} V300 Z`;
         }
-        block.setAttribute('d', d);
-        group.appendChild(block);
+        building.appendChild(el('path', { d }));
 
-        // Masts belong on the tall flat-topped towers, seated on the roof.
-        if (tall > 0.7 && (shape === 'tower' || shape === 'crown') && Math.random() < 0.6) {
-          const mastH = rand(20, 42);
-          const mast = document.createElementNS(SVGNS, 'rect');
-          mast.setAttribute('x', (x + w / 2 - 1.5).toFixed(1));
-          mast.setAttribute('y', (y - mastH).toFixed(1));
-          mast.setAttribute('width', '3');
-          mast.setAttribute('height', mastH.toFixed(1));
-          group.appendChild(mast);
+        // A cornice reads as a roof edge and stops the top looking cut off.
+        if (flatRoof && Math.random() < 0.45) {
+          building.appendChild(el('rect', {
+            x: x - 2, y: y - 2.5, width: w + 4, height: 3, rx: 1,
+          }));
         }
 
-        // Window grid, inset from the edges so it reads as a facade.
-        const cols = Math.max(1, Math.floor((w - 14) / layer.step));
-        const rows = Math.max(1, Math.floor((h - 20) / layer.step));
-        const lit = document.createElementNS(SVGNS, 'g');
-        lit.setAttribute('class', 'skyline__windows');
-        for (let c = 0; c < cols; c++) {
-          for (let r = 0; r < rows; r++) {
-            if (Math.random() > layer.windows * 0.55) continue;
-            const win = document.createElementNS(SVGNS, 'rect');
-            win.setAttribute('x', (x + 9 + c * layer.step).toFixed(1));
-            win.setAttribute('y', (y + 12 + r * layer.step).toFixed(1));
-            win.setAttribute('width', '7');
-            win.setAttribute('height', '9');
-            win.setAttribute('rx', '1');
-            // Each window keeps its own brightness so the facade is not uniform.
-            win.style.setProperty('--lit', rand(0.35, 1).toFixed(2));
-            lit.appendChild(win);
-          }
+        if (flatRoof && Math.random() < layer.roofChance) {
+          roofKit(building, x, w, y, layer.scale);
         }
-        group.appendChild(lit);
 
-        x += w + layer.gap + rand(4, 26);
+        // Curtain-wall towers get banded glazing, older blocks punched windows.
+        const style = tall > 0.55 && Math.random() < 0.45 ? 'ribbon' : 'punched';
+        const shapeTop = shape === 'pitched' || shape === 'spire' ? y + h * 0.18 : y;
+        facade(building, x, w, shapeTop, 300 - shapeTop, { ...layer, style });
+
+        // Warm offices and cool fluorescent floors, mixed across the city.
+        building.style.setProperty('--window-color', Math.random() < 0.68 ? '#ffd489' : '#cfe4ff');
+
+        group.appendChild(building);
+        x += w + rand(layer.gap[0], layer.gap[1]);
       }
       svg.appendChild(group);
     }
