@@ -180,8 +180,8 @@ body{
   overflow: visible;
   transition: opacity 1.4s ease, left 1s linear, top 1s linear;
 }
-:root[data-theme="light"] .sun,
-:root[data-theme="light"] .moon{
+:root:not([data-theme="amoled"]) .sun,
+:root:not([data-theme="amoled"]) .moon{
   display: block;
 }
 
@@ -221,7 +221,7 @@ body{
   inset: 0;
   display: none;
 }
-:root[data-theme="light"] .sky__clouds{
+:root:not([data-theme="amoled"]) .sky__clouds{
   display: block;
 }
 
@@ -259,7 +259,7 @@ body{
   display: none;
   pointer-events: none;
 }
-:root[data-theme="light"] .skyline{ display: block; }
+:root:not([data-theme="amoled"]) .skyline{ display: block; }
 
 /* Distance is carried by haze, not just by height: the far layer sits paler
    and bluer, the near layer close to solid. --dusk rises after sunset so the
@@ -292,7 +292,7 @@ body{
   display: none;
   pointer-events: none;
 }
-:root[data-theme="light"] .sky__traffic{
+:root:not([data-theme="amoled"]) .sky__traffic{
   display: block;
 }
 
@@ -360,23 +360,83 @@ body{
 .plane.is-night .plane__contrail{ opacity: 0.14; }
 .plane.is-night .plane__art{ filter: brightness(0.62) saturate(0.7); }
 
-.plane__lights{ display: none; }
-.plane.is-night .plane__lights{ display: block; }
+/* Aircraft run their nav lights in daylight too, they just barely read
+   against a bright sky. So they are always on, and night simply turns the
+   glow up rather than switching them into existence. */
+.plane__lights{
+  display: block;
+  opacity: var(--nav-opacity, 0.5);
+  transition: opacity 1.2s ease;
+}
+.plane.is-night .plane__lights{ --nav-opacity: 1; }
+
 .plane__lights span{
   position: absolute;
-  width: 4px; height: 4px;
+  width: var(--nav-size, 3px);
+  height: var(--nav-size, 3px);
   border-radius: 50%;
+  box-shadow: 0 0 var(--nav-glow, 2px) var(--nav-spread, 0px) currentColor;
 }
-.plane__lights .red{ left: 4%; top: 42%; background: #ff5252; box-shadow: 0 0 6px #ff5252; animation: blink 1.2s steps(1) infinite; }
-.plane__lights .green{ right: 6%; top: 52%; background: #4dff9a; box-shadow: 0 0 6px #4dff9a; animation: blink 1.2s steps(1) infinite reverse; }
+.plane.is-night .plane__lights span{
+  --nav-size: 4px;
+  --nav-glow: 7px;
+  --nav-spread: 1px;
+}
+
+.plane__lights .red{ left: 4%; top: 42%; color: #ff5252; background: currentColor; animation: blink 1.4s steps(1) infinite; }
+.plane__lights .green{ right: 6%; top: 52%; color: #4dff9a; background: currentColor; animation: blink 1.4s steps(1) infinite reverse; }
+.plane__lights .strobe{
+  left: 50%; top: 62%;
+  color: #fff;
+  background: currentColor;
+  animation: strobe 2.4s linear infinite;
+}
+.plane.is-night .plane__lights .strobe{
+  --nav-size: 5px;
+  --nav-glow: 10px;
+  --nav-spread: 3px;
+}
 
 @keyframes fly-across{
   from{ transform: translate(0, 0); }
   to{ transform: translate(calc(100vw + 420px), var(--flyer-drift, -40px)); }
 }
+
+/* Westbound traffic enters from the right and the artwork is mirrored, so the
+   nose still leads. The bob and flap animations live on inner elements, which
+   is what keeps this transform from fighting them. */
+.flyer.is-westbound{
+  left: auto;
+  right: -340px;
+  animation-name: fly-across-west;
+}
+.flyer.is-westbound .plane__art,
+.flyer.is-westbound .bird__frame{ transform: scaleX(-1); }
+.flyer.is-westbound .plane__contrail{
+  right: auto;
+  left: 92%;
+  background: linear-gradient(270deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.7) 100%);
+}
+.flyer.is-westbound .plane__lights .red{ left: auto; right: 4%; }
+.flyer.is-westbound .plane__lights .green{ right: auto; left: 6%; }
+
+@keyframes fly-across-west{
+  from{ transform: translate(0, 0); }
+  to{ transform: translate(calc(-100vw - 420px), var(--flyer-drift, -40px)); }
+}
+
 @keyframes blink{
   0%, 49%{ opacity: 1; }
   50%, 100%{ opacity: 0.15; }
+}
+
+/* A real airframe carries a fast double-flash on top of the steady nav
+   lights, which is what makes a distant plane readable at night. */
+@keyframes strobe{
+  0%, 4%   { opacity: 1; }
+  6%, 12%  { opacity: 0; }
+  14%, 18% { opacity: 1; }
+  20%, 100%{ opacity: 0; }
 }
 
 /* ---------------------------------------
@@ -1199,9 +1259,15 @@ body{
   opacity: 0.85;
   margin: 0;
 }
+/* Both themes put a lit city behind this line, so it always carries its own
+   contrast rather than relying on what happens to be behind it. */
 :root[data-theme="light"]{
   --footnote-color: rgba(255, 255, 255, 0.92);
   --footnote-shadow: 0 1px 4px rgba(12, 20, 38, 0.55);
+}
+:root[data-theme="dark"]{
+  --footnote-color: rgba(233, 238, 248, 0.8);
+  --footnote-shadow: 0 1px 5px rgba(4, 8, 18, 0.85);
 }
 
 /* ---------------------------------------
@@ -1238,18 +1304,72 @@ body{
   .sun, .moon, .card{
     transition: none;
   }
-  .cloud, .flyer, .bird svg, .sun use, .journey__halo,
-  .plane__lights .red, .plane__lights .green,
+  .cloud, .flyer, .bird__frame, .bird__flap, .sun use, .journey__halo,
+  .starfield, .star,
+  .plane__lights .red, .plane__lights .green, .plane__lights .strobe,
   .card.is-home .journey__marker--end,
   .card.is-milestone .journey__halo, .card.is-milestone .timer{
     animation: none;
   }
+  /* Without the flap cycle every pose would stack; keep only the first. */
+  .bird__frame{ opacity: 0; }
+  .bird__frame:first-child{ opacity: 1; }
   .tidbit__text{ transition: none; }
   .modal-backdrop, .panel{ transition: none; }
 }
 
+/* ---------------------------------------
+   Phones: a different composition, not a squeezed desktop
+--------------------------------------- */
+/* The card used to fill a phone screen top to bottom, which left the sky as a
+   sliver and hid the sun behind the card for most of the day. Here the card
+   sits low and the top third is kept open as sky, which is where the arc,
+   the clouds and the traffic actually live. */
+@media (max-width: 619px){
+  body{
+    align-items: flex-end;
+    padding: 0 14px calc(46px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .card{
+    max-width: none;
+    padding: 20px 20px 22px;
+    border-radius: 26px;
+  }
+
+  /* Tighter vertical rhythm buys back the height the open sky costs. */
+  .journey{ height: 74px; margin-bottom: 0; }
+  .journey__icon{ width: 26px; }
+  .timer{ font-size: clamp(40px, 15vw, 58px); margin: 4px 0 2px; }
+  .timer-label{ font-size: 15px; margin-bottom: 8px; }
+  .status{ font-size: 13px; margin-bottom: 16px; }
+  .progress-track{ margin-bottom: 16px; }
+  .week{ margin-bottom: 12px; }
+  .tidbit{ margin-top: 16px; padding-top: 14px; }
+  .tidbit__text{ font-size: 13px; }
+
+  /* A shorter city, so it grounds the card instead of swallowing it. */
+  .skyline{ height: clamp(90px, 16vh, 150px); }
+
+  .footnote{ bottom: calc(12px + env(safe-area-inset-bottom, 0px)); font-size: 11px; }
+
+  /* Full-height sheet rather than a floating dialog: on a phone there is no
+     surrounding context worth preserving behind it. */
+  .panel{
+    width: 100%;
+    max-height: 88vh;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    transform: translateY(18px);
+    border-radius: 26px 26px 0 0;
+    padding: 20px 20px calc(26px + env(safe-area-inset-bottom, 0px));
+  }
+  .panel.is-open{ transform: translateY(0); }
+}
+
 @media (max-width: 400px){
-  .card{ padding: 22px 18px 24px; }
   .schedule{ gap: 8px; }
   .timefield__num{ font-size: 15px; }
+  .weekday{ width: 25px; height: 25px; font-size: 10px; }
 }

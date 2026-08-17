@@ -346,9 +346,9 @@
       btn.setAttribute('aria-pressed', String(btn.dataset.theme === theme));
     }
     stopTraffic();
-    if (theme === 'light' && !reduceMotion) {
+    if (sceneActive()) {
       scheduleBirds(rand(1500, 5000));
-      schedulePlanes(rand(6000, 14000));
+      schedulePlanes(rand(4000, 12000));
     }
     tick();
   }
@@ -414,18 +414,46 @@
     { t: 1.0, core: '#FFB765', ray: '#F2762F' },
   ];
 
+  // Dark mode is the same sky at the same moment, seen at night: the moon
+  // takes the arc the sun is on, so the scene still tracks the real day. The
+  // palette is keyed to that height, which keeps the sky moving through the
+  // hours instead of sitting on one flat black.
+  const nightByAltitude = [
+    { at: -90, top: '#03050f', bottom: '#070b1a' },  // moon well below: darkest
+    { at: -18, top: '#050917', bottom: '#0b1124' },
+    { at: -6,  top: '#070d1f', bottom: '#131a33' },
+    { at: 0,   top: '#0a1228', bottom: '#22243f' },  // on the horizon, faint glow
+    { at: 12,  top: '#0b1530', bottom: '#26304f' },
+    { at: 35,  top: '#0d1a3c', bottom: '#2c3b62' },  // high and moonlit
+    { at: 90,  top: '#102048', bottom: '#334a78' },
+  ];
+
   function computeSky(now, workColors) {
     if (theme === 'amoled') return { top: '#000000', bottom: '#000000', stars: 0 };
+
+    const altitude = solarAltitude(now);
+
     if (theme === 'light') {
-      const altitude = solarAltitude(now);
       const { top, bottom } = interpolateBy(skyByAltitude, altitude);
       // Stars fade in through civil twilight and are fully out by the end of
       // astronomical twilight, which is roughly how the eye experiences it.
       const stars = clamp((-6 - altitude) / 12, 0, 1);
       const ambient = clamp((altitude + 6) / 14, 0, 1);
-      return { top, bottom, stars, ambient, altitude };
+      return { top, bottom, stars, ambient, altitude, night: false };
     }
-    return { top: workColors.top, bottom: workColors.bottom, stars: workColors.stars };
+
+    // Dark: always night, but never static. Moonlight stands in for ambient,
+    // so clouds and the city still lift and fall across the day.
+    const { top, bottom } = interpolateBy(nightByAltitude, altitude);
+    const moonlit = clamp((altitude + 10) / 55, 0, 1);
+    return {
+      top,
+      bottom,
+      stars: clamp(1 - moonlit * 0.35, 0.6, 1),
+      ambient: moonlit * 0.3,
+      altitude,
+      night: true,
+    };
   }
 
   // ---- Where the sun actually is --------------------------------------
@@ -532,23 +560,44 @@
   // so the dome keeps its shape from a phone to a wide desktop. Previously the
   // path was a flat percentage sweep, which read as a shallow smear on wide
   // screens and a near-vertical climb on narrow ones.
+  // On a phone the card owns the middle of the screen, so the same dome would
+  // spend the whole afternoon hidden behind it. Narrow viewports get a
+  // shallower arc that stays in the band of sky above the card.
+  function arcGeometry() {
+    const narrow = window.innerWidth < 620;
+    return narrow
+      ? { horizon: 44, amplitude: 37, spread: 44 }
+      : { horizon: 92, amplitude: 78, spread: 46 };
+  }
+
   function positionCelestial(el, t, opacity) {
-    // angle runs pi to 0 across the day, so cos sweeps -1 to 1: the sun comes
+    // angle runs pi to 0 across the day, so cos sweeps -1 to 1: the body comes
     // up on the left, peaks overhead at noon, and goes down on the right.
+    const { horizon, amplitude, spread } = arcGeometry();
     const angle = (1 - clamp(t, 0, 1)) * Math.PI;
-    const x = 50 + Math.cos(angle) * 46;
-    const y = 92 - Math.sin(angle) * 78;
-    el.style.left = x + '%';
-    el.style.top = y + '%';
+    el.style.left = (50 + Math.cos(angle) * spread) + '%';
+    el.style.top = (horizon - Math.sin(angle) * amplitude) + '%';
     el.style.opacity = String(opacity);
   }
 
-  function updateCelestial(now) {
+  function updateCelestial(now, night) {
     const h = hourDecimal(now);
     const { sunrise, sunset } = daylightWindow(now);
     const dayLength = Math.max(0.5, sunset - sunrise);
-
     const sunT = clamp((h - sunrise) / dayLength, 0, 1);
+
+    if (night) {
+      // The night twin: the moon rides exactly where the sun is, so dark mode
+      // tracks the same day rather than inventing a second clock. Off the
+      // daylight arc it falls back to its own path across the night.
+      const daytime = h >= sunrise && h <= sunset;
+      const nightLength = Math.max(0.5, 24 - dayLength);
+      const sinceSet = ((h - sunset) + 24) % 24;
+      positionCelestial(els.moon, daytime ? sunT : clamp(sinceSet / nightLength, 0, 1), 1);
+      els.sun.style.opacity = '0';
+      return;
+    }
+
     positionCelestial(els.sun, sunT, windowOpacity(h, sunrise, sunset, 0.6));
     const sunColors = interpolate(sunStops, sunT);
     els.sun.style.setProperty('--sun-core', sunColors.core);
@@ -758,10 +807,15 @@
 
   // Hard ceilings, so no combination of timing accidents can fill the sky.
   const MAX_BIRDS = 26;
-  const MAX_PLANES = 2;
+  const MAX_PLANES = 4;
 
   function isDaylightNow() {
     return solarAltitude(new Date()) > -6;
+  }
+
+  // Dark mode is night by definition; light mode is night only after dusk.
+  function isNightScene() {
+    return theme === 'dark' || !isDaylightNow();
   }
 
   // A background tab suspends CSS animations but keeps firing timers, so
@@ -888,9 +942,13 @@
 
   const AIRCRAFT = [
     // Jets fly high and fast and leave a contrail behind them.
-    { type: 'jet', sprite: '#art-plane', viewBox: PLANE_VIEWBOX, width: [58, 112], top: [3, 22], speed: [30, 48], contrail: true, weight: 6 },
+    { type: 'jet', sprite: '#art-plane', viewBox: PLANE_VIEWBOX, width: [58, 110], top: [3, 20], speed: [30, 48], contrail: true, weight: 5 },
+    // The heavy stuff: bigger, higher, slower to cross, longer contrail.
+    { type: 'widebody', sprite: '#art-widebody', viewBox: '0 0 190 92', width: [86, 140], top: [2, 14], speed: [40, 58], contrail: true, weight: 3 },
+    // Business jets run high and quick with a thin trail.
+    { type: 'bizjet', sprite: '#art-bizjet', viewBox: '0 0 150 70', width: [50, 78], top: [6, 24], speed: [24, 36], contrail: true, weight: 3 },
     // Props sit lower, run slower, and leave nothing at all.
-    { type: 'prop', sprite: '#art-prop', viewBox: '0 0 140 84', width: [44, 74], top: [18, 40], speed: [22, 34], contrail: false, weight: 4 },
+    { type: 'prop', sprite: '#art-prop', viewBox: '0 0 140 84', width: [44, 74], top: [18, 40], speed: [22, 34], contrail: false, weight: 3 },
   ];
 
 
@@ -899,9 +957,13 @@
 
     const kind = pickWeighted(AIRCRAFT);
     const livery = pick(LIVERIES);
+    const night = isNightScene();
 
     const plane = document.createElement('div');
-    plane.className = 'flyer plane plane--' + kind.type + (isDaylightNow() ? '' : ' is-night');
+    plane.className = 'flyer plane plane--' + kind.type + (night ? ' is-night' : '');
+    // Roughly a third of the traffic is heading the other way.
+    if (Math.random() < 0.38) plane.classList.add('is-westbound');
+
     plane.style.top = rand(kind.top[0], kind.top[1]).toFixed(1) + '%';
     plane.style.width = rand(kind.width[0], kind.width[1]).toFixed(0) + 'px';
     plane.style.setProperty('--livery-accent', livery.accent);
@@ -912,29 +974,35 @@
     plane.innerHTML =
       (kind.contrail ? '<div class="plane__contrail"></div>' : '') +
       '<svg class="plane__art" viewBox="' + kind.viewBox + '"><use href="#' + kind.sprite.slice(1) + '"/></svg>' +
-      '<div class="plane__lights"><span class="red"></span><span class="green"></span></div>';
+      '<div class="plane__lights"><span class="red"></span><span class="green"></span><span class="strobe"></span></div>';
     launch(plane, rand(kind.speed[0], kind.speed[1]).toFixed(1), rand(-40, -10));
   }
 
-  function trafficAllowed() {
-    return theme === 'light' && !reduceMotion && !document.hidden;
+  function sceneActive() {
+    return theme !== 'amoled' && !reduceMotion;
   }
 
-  function scheduleBirds(delay) {
-    if (theme === 'light' && !reduceMotion) {
-      birdTimeout = setTimeout(() => {
-        if (trafficAllowed() && isDaylightNow()) spawnFlock();
-        scheduleBirds(rand(9000, 22000));
-      }, delay);
-    }
+  function trafficAllowed() {
+    return sceneActive() && !document.hidden;
   }
+
+  // Birds roost after dark, so the night sky belongs to the aircraft.
+  function scheduleBirds(delay) {
+    if (!sceneActive()) return;
+    birdTimeout = setTimeout(() => {
+      if (trafficAllowed() && !isNightScene()) spawnFlock();
+      // A long wait when nothing will be spawned anyway keeps timers cheap.
+      scheduleBirds(isNightScene() ? rand(40000, 70000) : rand(9000, 22000));
+    }, delay);
+  }
+
   function schedulePlanes(delay) {
-    if (theme === 'light' && !reduceMotion) {
-      planeTimeout = setTimeout(() => {
-        if (trafficAllowed()) spawnPlane();
-        schedulePlanes(rand(38000, 85000));
-      }, delay);
-    }
+    if (!sceneActive()) return;
+    planeTimeout = setTimeout(() => {
+      if (trafficAllowed()) spawnPlane();
+      // Night traffic runs much heavier, which is also when it is most visible.
+      schedulePlanes(isNightScene() ? rand(9000, 22000) : rand(34000, 72000));
+    }, delay);
   }
   function stopTraffic() {
     clearTimeout(birdTimeout);
@@ -950,10 +1018,10 @@
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       stopTraffic();
-    } else if (theme === 'light' && !reduceMotion) {
+    } else if (sceneActive()) {
       stopTraffic();
       scheduleBirds(rand(1200, 4000));
-      schedulePlanes(rand(8000, 20000));
+      schedulePlanes(rand(5000, 14000));
     }
   });
 
@@ -1825,13 +1893,15 @@
     els.sky.style.setProperty('--sky-bottom', sky.bottom);
     els.stars.style.setProperty('--stars-opacity', sky.stars.toFixed(2));
 
-    if (theme === 'light') {
-      updateCelestial(now);
-      updateClouds(sky.ambient ?? 1);
-      updateSkyline(sky.ambient ?? 1, sky.stars ?? 0);
-    } else {
+    // Light and dark are two views of the same sky, so both drive the scene;
+    // only AMOLED drops it for a flat black canvas.
+    if (theme === 'amoled') {
       els.sun.style.opacity = 0;
       els.moon.style.opacity = 0;
+    } else {
+      updateCelestial(now, sky.night);
+      updateClouds(sky.ambient ?? 1);
+      updateSkyline(sky.ambient ?? 1, sky.stars ?? 0);
     }
 
     // The first stretch past your hours reads as a win; after that it does not.
