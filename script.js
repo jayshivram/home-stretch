@@ -1877,7 +1877,11 @@
         const mark = document.createElement('span');
         mark.className = 'week__day';
         mark.dataset.day = String(d.index);
-        mark.innerHTML = '<i class="week__fill"></i>';
+        // The initial makes the row self-explanatory and stops it reading as a
+        // second, unlabelled copy of the day's progress bar.
+        mark.innerHTML = '<i class="week__track"><i class="week__fill"></i></i>'
+          + '<b class="week__letter">' + dayName(d.index, { weekday: 'narrow' }) + '</b>';
+        mark.title = dayName(d.index, { weekday: 'long' });
         return mark;
       }));
     }
@@ -1892,6 +1896,8 @@
       const fill = at < position ? 1 : (isToday ? dayProgress : 0);
       mark.classList.toggle('is-today', isToday);
       mark.querySelector('.week__fill').style.transform = `scaleX(${fill.toFixed(3)})`;
+      // Days already behind you read at full strength; days ahead stay quiet.
+      mark.querySelector('.week__letter').style.opacity = at < position ? '0.8' : '';
     }
   }
 

@@ -5,7 +5,7 @@
   --cream:        #f7f2e9;
   --cream-dim:    #cfc9bd;
   --ink:          #10131c;
-  --ink-dim:      rgba(16, 19, 28, 0.62);
+  --ink-dim:      rgba(16, 19, 28, 0.68);
   --amber:        #f2a154;
   --coral:        #e8613c;
   --teal:         #4f9c8a;
@@ -16,6 +16,13 @@
 
   --radius-lg: 30px;
   --radius-md: 14px;
+
+  /* Spacing scale. The card previously used eight ad-hoc margins, so nothing
+     grouped: tight intervals bind a unit, section separates groups. */
+  --space-hair: 2px;   /* a label to the number it belongs to */
+  --space-tight: 10px; /* within one idea */
+  --space-group: 16px; /* between related blocks */
+  --space-section: 30px; /* between distinct groups */
 
   /* Theme tokens: default (dark) values, overridden per data-theme below */
   --text:          var(--cream);
@@ -523,9 +530,17 @@ body{
   border-radius: var(--radius-lg);
   padding: 26px 30px 30px;
   text-align: center;
-  box-shadow: var(--card-shadow);
+  /* The rim is directional rather than a uniform hairline: light comes from
+     the sky above, so the top edge catches it and the bottom does not. That
+     is what makes the panel read as a pane of glass instead of an outlined
+     box sitting under a shadow. */
+  box-shadow: var(--card-shadow), inset 0 1px 0 var(--card-rim, rgba(255, 255, 255, 0.28));
   transition: background 0.6s ease, border-color 0.6s ease, box-shadow 0.6s ease;
 }
+
+:root[data-theme="light"]{ --card-rim: rgba(255, 255, 255, 0.85); }
+:root[data-theme="dark"]{ --card-rim: rgba(233, 240, 255, 0.16); }
+:root[data-theme="amoled"]{ --card-rim: rgba(255, 255, 255, 0.07); }
 
 /* ---------------------------------------
    Segmented toggles, shared by the theme and format switchers
@@ -579,7 +594,7 @@ body{
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: var(--space-group);
 }
 
 .eyebrow{
@@ -601,7 +616,7 @@ body{
   position: relative;
   width: 100%;
   height: 96px;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-hair);
 }
 
 .journey__svg{
@@ -722,7 +737,7 @@ body{
   font-weight: 600;
   font-size: clamp(42px, 12vw, 60px);
   letter-spacing: -0.02em;
-  margin: 8px 0 2px;
+  margin: 6px 0 var(--space-hair);
   font-variant-numeric: tabular-nums;
   color: var(--text);
   transition: color 0.6s ease;
@@ -733,13 +748,13 @@ body{
   font-style: italic;
   font-size: 17px;
   color: var(--text-dim);
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-tight);
 }
 
 .status{
   font-size: 13.5px;
   color: var(--text-dim);
-  margin: 0 0 20px;
+  margin: 0 0 var(--space-section);
   min-height: 18px;
 }
 
@@ -751,7 +766,7 @@ body{
   border-radius: 5px;
   background: var(--track-bg);
   overflow: hidden;
-  margin-bottom: 26px;
+  margin-bottom: var(--space-group);
 }
 
 /* Scaled rather than resized: this runs every second, and animating width
@@ -1113,18 +1128,29 @@ body{
 .week{
   display: flex;
   justify-content: center;
-  gap: 5px;
-  margin: 0 0 14px;
+  gap: 6px;
+  margin: 0 0 var(--space-tight);
 }
 
+/* Labelled, so the row is legible on its own rather than a second unnamed
+   rail sitting under the day's progress bar. */
 .week__day{
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   width: 26px;
+}
+
+.week__track{
+  position: relative;
+  display: block;
+  width: 100%;
   height: 3px;
   border-radius: 3px;
   background: var(--track-bg);
   overflow: hidden;
-  transition: background 0.6s ease;
+  transition: background 0.6s ease, height 0.3s ease;
 }
 
 .week__fill{
@@ -1137,11 +1163,22 @@ body{
   transition: transform 0.9s linear, background 1.2s ease;
 }
 
-/* Today reads a step brighter and a touch taller than the days around it. */
-.week__day.is-today{
-  height: 5px;
-  margin-top: -1px;
-  box-shadow: 0 0 0 1px var(--card-border);
+.week__letter{
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0.5;
+  transition: opacity 0.3s ease, color 0.6s ease;
+}
+
+/* Today reads a step stronger than the days around it. */
+.week__day.is-today .week__track{ height: 5px; }
+.week__day.is-today .week__letter{
+  opacity: 1;
+  color: var(--accent, var(--amber));
 }
 
 .card.is-dayoff .week{ opacity: 0.55; }
@@ -1242,7 +1279,7 @@ body{
    Tidbit: something to read while the clock runs down
 --------------------------------------- */
 .tidbit{
-  margin-top: 20px;
+  margin-top: var(--space-section);
   padding-top: 18px;
   border-top: 1px solid var(--line-faint);
   transition: border-color 0.6s ease;
