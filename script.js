@@ -349,6 +349,7 @@
     if (sceneActive()) {
       scheduleBirds(rand(1500, 5000));
       schedulePlanes(rand(4000, 12000));
+      scheduleMeteors(rand(20000, 60000));
     }
     tick();
   }
@@ -648,9 +649,9 @@
   // viewport units keep them spread as the window resizes.
   function buildStarfield() {
     const layers = [
-      { count: 78, size: 1, alpha: 0.5, period: 7 },
-      { count: 46, size: 1.4, alpha: 0.72, period: 9.5 },
-      { count: 20, size: 1.9, alpha: 0.92, period: 12 },
+      { count: 150, size: 1, alpha: 0.5, period: 7 },
+      { count: 92, size: 1.4, alpha: 0.72, period: 9.5 },
+      { count: 38, size: 1.9, alpha: 0.92, period: 12 },
     ];
 
     document.querySelectorAll('.starfield').forEach((el, index) => {
@@ -668,10 +669,11 @@
       el.style.animationDelay = (-index * 2.3) + 's';
     });
 
+
     // A handful of named-star-bright points, each twinkling on its own clock.
     const bright = document.getElementById('brightStars');
     const frag = document.createDocumentFragment();
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 16; i++) {
       const star = document.createElement('span');
       star.className = 'star';
       star.style.left = rand(4, 96).toFixed(2) + 'vw';
@@ -724,6 +726,61 @@
     els.clouds.replaceChildren(frag);
   }
 
+  // ---- Meteors -----------------------------------------------------------
+  // A meteor's colour comes from what is burning off it: sodium glows amber,
+  // magnesium blue-green, calcium violet, iron a soft gold, and the shocked
+  // air itself adds the red of nitrogen and oxygen. These are the real
+  // dominant lines, so the sky ends up mostly gold with the occasional
+  // startling green.
+  const METEOR_ELEMENTS = [
+    { name: 'sodium', core: '#fff4d6', trail: '#ffb648', weight: 30 },
+    { name: 'iron', core: '#fff2cf', trail: '#ffd27a', weight: 26 },
+    { name: 'magnesium', core: '#e8fff6', trail: '#57ffc8', weight: 16 },
+    { name: 'nitrogen and oxygen', core: '#ffe6e6', trail: '#ff5f6d', weight: 12 },
+    { name: 'calcium', core: '#f3ecff', trail: '#a97bff', weight: 9 },
+    { name: 'nickel', core: '#eefaff', trail: '#8fd8ff', weight: 7 },
+  ];
+
+  let meteorTimeout = null;
+
+  function spawnMeteor() {
+    const element = pickWeighted(METEOR_ELEMENTS);
+    // Real showers radiate from a point, but sporadics come from anywhere, so
+    // the entry angle is drawn across a wide range rather than fixed.
+    const angle = rand(18, 62) * (Math.random() < 0.5 ? 1 : -1);
+    const length = rand(90, 260);
+    const travel = rand(360, 900);
+    const life = rand(0.55, 1.5);
+
+    const meteor = document.createElement('div');
+    meteor.className = 'meteor';
+    meteor.style.left = rand(-5, 95) + 'vw';
+    meteor.style.top = rand(-2, 46) + 'vh';
+    meteor.style.setProperty('--angle', angle.toFixed(1) + 'deg');
+    meteor.style.setProperty('--len', length.toFixed(0) + 'px');
+    meteor.style.setProperty('--travel', travel.toFixed(0) + 'px');
+    meteor.style.setProperty('--core', element.core);
+    meteor.style.setProperty('--trail', element.trail);
+    meteor.style.animationDuration = life.toFixed(2) + 's';
+
+    const remove = () => { clearTimeout(meteor._expiry); meteor.remove(); };
+    meteor.addEventListener('animationend', remove);
+    meteor._expiry = setTimeout(remove, (life + 2) * 1000);
+    els.skyTraffic.appendChild(meteor);
+
+    // Bright ones sometimes arrive in twos, as a fragmenting body does.
+    if (Math.random() < 0.1) setTimeout(() => { if (trafficAllowed()) spawnMeteor(); }, rand(200, 700));
+  }
+
+  function scheduleMeteors(delay) {
+    if (!sceneActive()) return;
+    meteorTimeout = setTimeout(() => {
+      // Only worth watching against a dark sky.
+      if (trafficAllowed() && isNightScene()) spawnMeteor();
+      scheduleMeteors(isNightScene() ? rand(70000, 190000) : rand(240000, 420000));
+    }, delay);
+  }
+
   // ---- Skyline ----------------------------------------------------------
   // A city drawn from rules rather than a fixed asset: two depth layers, the
   // far one hazier and shorter, so the horizon reads as distance rather than
@@ -745,36 +802,55 @@
       group.setAttribute('class', layer.klass);
 
       let x = -40;
+      let lastShape = '';
       while (x < 1640) {
-        const w = rand(layer.minW, layer.maxW);
-        const h = rand(layer.minH, layer.maxH);
-        const top = 300 - layer.y - h + layer.y;
+        // Real skylines correlate height with slenderness: the tall things are
+        // towers, the wide things are blocks. Picking width and height
+        // independently was what produced the occasional squat slab.
+        const tall = Math.pow(Math.random(), 1.5);
+        const h = layer.minH + tall * (layer.maxH - layer.minH);
+        const w = layer.minW + (1 - tall * 0.72) * (layer.maxW - layer.minW) * rand(0.72, 1);
         const y = 300 - h;
 
+        // Never the same silhouette twice running.
+        const options = tall > 0.62
+          ? ['tower', 'setback', 'spire', 'crown']
+          : ['slab', 'block', 'crown', 'pitched'];
+        let shape = pick(options);
+        if (shape === lastShape) shape = pick(options.filter(s => s !== lastShape));
+        lastShape = shape;
+
         const block = document.createElementNS(SVGNS, 'path');
-        // Occasional setback shoulders and a crown, so the roofline is not a
-        // row of plain boxes.
-        const roll = Math.random();
         let d;
-        if (roll < 0.18) {
-          const inset = w * rand(0.16, 0.28);
-          const shoulder = y + h * rand(0.12, 0.24);
-          d = `M${x} 300 V${shoulder} H${x + inset} V${y} H${x + w - inset} V${shoulder} H${x + w} V300 Z`;
-        } else if (roll < 0.3) {
-          d = `M${x} 300 V${y + 14} L${x + w / 2} ${y} L${x + w} ${y + 14} V300 Z`;
+        if (shape === 'setback') {
+          // Two stepped shoulders, art-deco fashion.
+          const i1 = w * rand(0.12, 0.2), i2 = w * rand(0.26, 0.36);
+          const s1 = y + h * rand(0.16, 0.26), s2 = y + h * rand(0.05, 0.12);
+          d = `M${x} 300 V${s1} H${x + i1} V${s2} H${x + i2} V${y} H${x + w - i2} V${s2} `
+            + `H${x + w - i1} V${s1} H${x + w} V300 Z`;
+        } else if (shape === 'crown') {
+          // A smaller plant room set back on the roof.
+          const i = w * rand(0.24, 0.34), cap = h * rand(0.07, 0.13);
+          d = `M${x} 300 V${y + cap} H${x + i} V${y} H${x + w - i} V${y + cap} H${x + w} V300 Z`;
+        } else if (shape === 'spire') {
+          const i = w * rand(0.3, 0.4);
+          d = `M${x} 300 V${y + h * 0.16} L${x + i} ${y} H${x + w - i} L${x + w} ${y + h * 0.16} V300 Z`;
+        } else if (shape === 'pitched') {
+          d = `M${x} 300 V${y + 13} L${x + w / 2} ${y} L${x + w} ${y + 13} V300 Z`;
         } else {
           d = `M${x} 300 V${y} H${x + w} V300 Z`;
         }
         block.setAttribute('d', d);
         group.appendChild(block);
 
-        // Masts on the taller towers only.
-        if (h > layer.maxH * 0.72 && Math.random() < 0.55) {
+        // Masts belong on the tall flat-topped towers, seated on the roof.
+        if (tall > 0.7 && (shape === 'tower' || shape === 'crown') && Math.random() < 0.6) {
+          const mastH = rand(20, 42);
           const mast = document.createElementNS(SVGNS, 'rect');
           mast.setAttribute('x', (x + w / 2 - 1.5).toFixed(1));
-          mast.setAttribute('y', (y - rand(18, 40)).toFixed(1));
+          mast.setAttribute('y', (y - mastH).toFixed(1));
           mast.setAttribute('width', '3');
-          mast.setAttribute('height', '44');
+          mast.setAttribute('height', mastH.toFixed(1));
           group.appendChild(mast);
         }
 
@@ -940,15 +1016,21 @@
     { accent: '#2C3440', body: '#E9EDF3', shade: '#1B2029', ink: '#11151B' }, // charcoal
   ];
 
+  // The host viewBox always starts at 0 0 even though each symbol carries its
+  // own crop: <use> drops the symbol's viewport at the user-space origin, so a
+  // shifted host box would push the aircraft off screen.
+  // Seven airframes. Altitude, speed and contrail follow the real thing: the
+  // heavy metal cruises high and leaves a trail, props and helicopters work
+  // low down and leave nothing.
   const AIRCRAFT = [
-    // Jets fly high and fast and leave a contrail behind them.
-    { type: 'jet', sprite: '#art-plane', viewBox: PLANE_VIEWBOX, width: [58, 110], top: [3, 20], speed: [30, 48], contrail: true, weight: 5 },
-    // The heavy stuff: bigger, higher, slower to cross, longer contrail.
-    { type: 'widebody', sprite: '#art-widebody', viewBox: '0 0 190 92', width: [86, 140], top: [2, 14], speed: [40, 58], contrail: true, weight: 3 },
-    // Business jets run high and quick with a thin trail.
-    { type: 'bizjet', sprite: '#art-bizjet', viewBox: '0 0 150 70', width: [50, 78], top: [6, 24], speed: [24, 36], contrail: true, weight: 3 },
-    // Props sit lower, run slower, and leave nothing at all.
-    { type: 'prop', sprite: '#art-prop', viewBox: '0 0 140 84', width: [44, 74], top: [18, 40], speed: [22, 34], contrail: false, weight: 3 },
+    { type: 'jet', sprite: 'art-plane', viewBox: PLANE_VIEWBOX, width: [58, 106], top: [4, 20], speed: [30, 48], contrail: true, weight: 6 },
+    { type: 'jumbo', sprite: 'art-jumbo', viewBox: '0 0 186 96', width: [96, 148], top: [2, 12], speed: [44, 62], contrail: true, weight: 2 },
+    { type: 'widebody', sprite: 'art-widebody', viewBox: '0 0 168 92', width: [84, 132], top: [3, 15], speed: [40, 56], contrail: true, weight: 3 },
+    { type: 'regional', sprite: 'art-regional', viewBox: '0 0 120 88', width: [48, 74], top: [8, 26], speed: [24, 36], contrail: true, weight: 3 },
+    { type: 'bizjet', sprite: 'art-bizjet', viewBox: '0 0 112 88', width: [42, 64], top: [6, 22], speed: [20, 30], contrail: true, weight: 2 },
+    { type: 'prop', sprite: 'art-prop', viewBox: '0 0 126 96', width: [44, 70], top: [20, 40], speed: [24, 36], contrail: false, weight: 3 },
+    // Helicopters work the low airspace over the city, slow and trail-free.
+    { type: 'heli', sprite: 'art-heli', viewBox: '0 0 200 120', width: [46, 74], top: [30, 52], speed: [26, 40], contrail: false, weight: 2 },
   ];
 
 
@@ -973,7 +1055,7 @@
 
     plane.innerHTML =
       (kind.contrail ? '<div class="plane__contrail"></div>' : '') +
-      '<svg class="plane__art" viewBox="' + kind.viewBox + '"><use href="#' + kind.sprite.slice(1) + '"/></svg>' +
+      '<svg class="plane__art" viewBox="' + kind.viewBox + '"><use href="#' + kind.sprite + '"/></svg>' +
       '<div class="plane__lights"><span class="red"></span><span class="green"></span><span class="strobe"></span></div>';
     launch(plane, rand(kind.speed[0], kind.speed[1]).toFixed(1), rand(-40, -10));
   }
@@ -1007,8 +1089,10 @@
   function stopTraffic() {
     clearTimeout(birdTimeout);
     clearTimeout(planeTimeout);
+    clearTimeout(meteorTimeout);
     birdTimeout = null;
     planeTimeout = null;
+    meteorTimeout = null;
     for (const el of els.skyTraffic.children) clearTimeout(el._expiry);
     els.skyTraffic.replaceChildren();
   }
@@ -1022,6 +1106,7 @@
       stopTraffic();
       scheduleBirds(rand(1200, 4000));
       schedulePlanes(rand(5000, 14000));
+      scheduleMeteors(rand(18000, 55000));
     }
   });
 
@@ -1070,6 +1155,35 @@
     ['Did you know', 'Some snails can sleep for up to three years when conditions get dry.'],
     ['Did you know', 'Roughly half the cells you are carrying around are not human. Most of the rest are bacteria.'],
 
+    ['Did you know', 'A meteor gets its colour from what is burning off it. Sodium glows amber, magnesium blue-green, calcium violet, and the shocked air adds red.'],
+    ['Did you know', 'Most meteors are smaller than a grain of rice. The streak is air being crushed and heated, not the rock itself glowing.'],
+    ['Did you know', 'About 48 tonnes of meteoritic material hits the Earth every day, almost all of it as dust.'],
+    ['Did you know', 'The Milky Way looks like a band because we are inside the disc, looking along it from within.'],
+    ['Did you know', 'The dark lane splitting the Milky Way is not empty. It is dust, blocking the light of the stars behind it.'],
+    ['Did you know', 'Aircraft carry a red light on the left wing and a green one on the right, so you can tell which way one is heading in the dark.'],
+    ['Did you know', 'Contrails are clouds. Engine exhaust adds water vapour to air already cold enough to freeze it.'],
+    ['Did you know', 'The Sun makes up about 99.86 per cent of all the mass in the solar system.'],
+    ['Did you know', 'Betelgeuse is so large that if it replaced the Sun, it would swallow the orbit of Mars.'],
+    ['Did you know', 'There is no sound in space, because sound needs something to travel through and there is almost nothing there.'],
+    ['Did you know', 'A day on Mars is 24 hours 37 minutes, which is why Mars mission crews drift out of sync with Earth.'],
+    ['Did you know', 'Neutron star material is so dense that a teaspoon of it would weigh about a billion tonnes.'],
+    ['Did you know', 'Venus spins backwards. On Venus the Sun rises in the west.'],
+    ['Did you know', 'Jupiter has no surface to stand on. The gas just gets thicker until it becomes liquid.'],
+    ['Did you know', 'Light from the nearest star after the Sun takes four years and three months to get here.'],
+    ['Did you know', 'The tallest known mountain in the solar system is on Mars, and it is nearly three times the height of Everest.'],
+    ['Did you know', 'Skyscrapers sway on purpose. A rigid tower would tear itself apart in high wind.'],
+    ['Did you know', 'The Empire State Building has its own postcode.'],
+    ['Did you know', 'Seagulls can drink seawater. Glands above their eyes strip the salt back out.'],
+    ['Did you know', 'Birds have hollow bones braced with internal struts, which is how they stay both light and strong.'],
+    ['Did you know', 'Migrating birds fly in a V because each one rides the upwash off the wingtip ahead, saving energy.'],
+    ['Did you know', 'Some swifts stay airborne for ten months at a stretch, eating and even sleeping on the wing.'],
+    ['Did you know', 'The albatross can glide for hours without flapping, using the wind gradient just above the waves.'],
+    ['Did you know', 'Clouds are not weightless. An average cumulus holds roughly the water of a hundred elephants.'],
+    ['Did you know', 'The sky is blue because air scatters short wavelengths hardest. At sunset the light travels further, so only the reds survive.'],
+    ['Did you know', 'Golden hour is warm because low sunlight passes through much more atmosphere, which filters out the blue.'],
+    ['Did you know', 'The Moon is drifting away fast enough that total solar eclipses will eventually stop happening.'],
+    ['Did you know', 'Every atom of iron in your blood was forged inside a star that died before the Sun existed.'],
+
     ['Two minute break', 'Look at something twenty feet away for twenty seconds. Your eyes have been locked at one distance for a while.'],
     ['Two minute break', 'Stand up. Roll your shoulders back five times, slowly.'],
     ['Two minute break', 'Drink a glass of water. You probably have not in a while.'],
@@ -1094,6 +1208,20 @@
     ['Worth a thought', 'What is the first thing you want to do when you walk through the door?'],
     ['Worth a thought', 'If tomorrow had room for one task only, which would you pick?'],
     ['Worth a thought', 'What are you doing now that will not matter at all in a week?'],
+    ['Worth a thought', 'What would the version of you from five years ago be impressed by right now?'],
+    ['Worth a thought', 'Is the thing stressing you a problem, or just an unmade decision?'],
+    ['Worth a thought', 'What is one thing you could stop doing entirely, with nobody noticing?'],
+    ['Worth a thought', 'Who would you ask for help, if asking were free?'],
+    ['Worth a thought', 'What did you learn today? Anything counts.'],
+    ['Worth a thought', 'If this week were a chapter, what would it be called?'],
+
+    ['Two minute break', 'Look up. Actually look up, out of a window if there is one.'],
+    ['Two minute break', 'Put both feet flat on the floor and take one very slow breath.'],
+    ['Two minute break', 'Roll your ankles under the desk. They have been still for hours.'],
+    ['Two minute break', 'Wash your hands with cold water and dry them properly. It resets you more than it should.'],
+    ['Two minute break', 'Clear the tabs you are not using. All of them.'],
+    ['Two minute break', 'Stand and reach overhead for ten seconds. Your spine has been compressing all day.'],
+    ['Two minute break', "Write tomorrow's first task on paper, so you can stop holding it."],
   ];
 
   const TIDBIT_KEY = 'homeStretch.tidbits';
