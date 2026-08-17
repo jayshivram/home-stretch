@@ -351,6 +351,7 @@
       btn.setAttribute('aria-pressed', String(btn.dataset.theme === theme));
     }
     stopTraffic();
+    endEclipse();
     if (sceneActive()) {
       scheduleBirds(rand(1500, 5000));
       schedulePlanes(rand(4000, 12000));
@@ -1460,7 +1461,11 @@
     clearTimeout(planeTimeout);
     clearTimeout(meteorTimeout);
     clearTimeout(eclipseTimeout);
-    endEclipse();
+    // A running eclipse is deliberately left alone. It is a timed astronomical
+    // event driven by wall clock, not by frames, so it survives a tab switch
+    // and is picked up at whatever stage it has reached, exactly as the real
+    // sky would. Ending it here meant glancing at another tab silently
+    // cancelled a twelve minute event.
     birdTimeout = null;
     planeTimeout = null;
     meteorTimeout = null;
