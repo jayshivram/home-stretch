@@ -701,11 +701,19 @@
 
   // Clouds live on three depth bands. Nearer clouds are bigger, faster and
   // more opaque, which is what sells the sky as having depth at all.
+  // Nine shapes across three families: the supplied flat bars, billowed
+  // cumulus, and thin cirrus. Cirrus is tagged so it can be kept high and
+  // faint, where that kind of cloud actually lives.
   const CLOUD_SHAPES = [
     { id: '#art-cloud-1', viewBox: '0 0 77 22' },
     { id: '#art-cloud-2', viewBox: '0 0 90 32' },
     { id: '#art-cloud-3', viewBox: '0 0 74 35' },
     { id: '#art-cloud-4', viewBox: '0 0 78 29' },
+    { id: '#art-cloud-5', viewBox: '0 0 128 64' },
+    { id: '#art-cloud-6', viewBox: '0 0 168 74' },
+    { id: '#art-cloud-7', viewBox: '0 0 180 44', high: true },
+    { id: '#art-cloud-8', viewBox: '0 0 84 42' },
+    { id: '#art-cloud-9', viewBox: '0 0 150 52' },
   ];
 
   function buildClouds() {
@@ -728,7 +736,13 @@
 
         const duration = rand(band.speed[0], band.speed[1]);
         svg.style.width = rand(band.width[0], band.width[1]).toFixed(0) + 'px';
-        svg.style.top = rand(band.top[0], band.top[1]).toFixed(2) + '%';
+        // Cirrus rides above the weather and thinner, so it is pinned to the
+        // top of whatever band it lands in and dialled back.
+        const topRange = shape.high
+          ? [band.top[0], band.top[0] + (band.top[1] - band.top[0]) * 0.4]
+          : band.top;
+        svg.style.top = rand(topRange[0], topRange[1]).toFixed(2) + '%';
+        if (shape.high) svg.style.setProperty('--wisp', '0.62');
         svg.style.animationDuration = duration.toFixed(1) + 's';
         // Negative delays scatter them across the sky on first paint instead
         // of marching them all in from the left edge together.
@@ -925,9 +939,11 @@
         const w = layer.minW + (1 - tall * 0.7) * (layer.maxW - layer.minW) * rand(0.7, 1);
         const y = 300 - h;
 
+        // Tall forms belong to towers, squat ones to blocks; a domed low-rise
+        // reads as civic, a domed skyscraper reads as a mistake.
         const options = tall > 0.6
-          ? ['tower', 'setback', 'spire', 'crown', 'tower']
-          : ['slab', 'block', 'crown', 'pitched'];
+          ? ['tower', 'setback', 'ziggurat', 'taper', 'spire', 'crown', 'notch', 'chamfer', 'tower']
+          : ['slab', 'block', 'crown', 'pitched', 'chamfer', 'slab', 'block', 'dome'];
         let shape = pick(options);
         if (shape === lastShape) shape = pick(options.filter(s => s !== lastShape));
         lastShape = shape;
@@ -937,15 +953,49 @@
         const building = el('g', {});
         building.style.setProperty('--tone', rand(layer.tone[0], layer.tone[1]).toFixed(3));
 
+        // The flat part of the roof, which is rarely the full width. Cornices
+        // and rooftop clutter are placed against this rather than against the
+        // footprint, otherwise they float out past a tapered top.
+        let roofX = x, roofW = w;
         let d, flatRoof = true;
         if (shape === 'setback') {
           const i1 = w * rand(0.1, 0.18), i2 = w * rand(0.24, 0.34);
           const s1 = y + h * rand(0.18, 0.28), s2 = y + h * rand(0.06, 0.13);
           d = `M${x} 300 V${s1} H${x + i1} V${s2} H${x + i2} V${y} H${x + w - i2} V${s2} `
             + `H${x + w - i1} V${s1} H${x + w} V300 Z`;
+          roofX = x + i2; roofW = w - i2 * 2;
+        } else if (shape === 'ziggurat') {
+          // Four shallow steps, the pre-war setback ordinance silhouette.
+          const i = w * 0.11, s = h * 0.13;
+          d = `M${x} 300 V${y + s * 3} H${x + i} V${y + s * 2} H${x + i * 2} V${y + s} `
+            + `H${x + i * 3} V${y} H${x + w - i * 3} V${y + s} H${x + w - i * 2} V${y + s * 2} `
+            + `H${x + w - i} V${y + s * 3} H${x + w} V300 Z`;
+          roofX = x + i * 3; roofW = w - i * 6;
+        } else if (shape === 'taper') {
+          // Walls that lean in the whole way up.
+          const i = w * rand(0.16, 0.26);
+          d = `M${x} 300 V${y + h * 0.3} L${x + i} ${y} H${x + w - i} L${x + w} ${y + h * 0.3} V300 Z`;
+          roofX = x + i; roofW = w - i * 2;
+        } else if (shape === 'dome') {
+          // A shallow cap. A radius of half the width turned low-rises into
+          // hemispheres that read as hills rather than buildings.
+          const r = Math.min(w * 0.34, h * 0.16);
+          d = `M${x} 300 V${y + r} C${x} ${y} ${x + w} ${y} ${x + w} ${y + r} V300 Z`;
+          flatRoof = false;
+        } else if (shape === 'notch') {
+          // Twin peaks with a service well between them.
+          const g1 = w * rand(0.38, 0.44), g2 = w * rand(0.56, 0.62);
+          d = `M${x} 300 V${y} H${x + g1} V${y + h * rand(0.1, 0.18)} H${x + g2} V${y} `
+            + `H${x + w} V300 Z`;
+          roofX = x; roofW = g1;
+        } else if (shape === 'chamfer') {
+          const c = Math.min(w * 0.22, h * 0.14);
+          d = `M${x} 300 V${y + c} L${x + c} ${y} H${x + w - c} L${x + w} ${y + c} V300 Z`;
+          roofX = x + c; roofW = w - c * 2;
         } else if (shape === 'crown') {
           const i = w * rand(0.22, 0.32), cap = h * rand(0.06, 0.12);
           d = `M${x} 300 V${y + cap} H${x + i} V${y} H${x + w - i} V${y + cap} H${x + w} V300 Z`;
+          roofX = x + i; roofW = w - i * 2;
         } else if (shape === 'spire') {
           const i = w * rand(0.28, 0.4);
           d = `M${x} 300 V${y + h * 0.15} L${x + i} ${y} H${x + w - i} L${x + w} ${y + h * 0.15} V300 Z`;
@@ -958,15 +1008,37 @@
         }
         building.appendChild(el('path', { d }));
 
-        // A cornice reads as a roof edge and stops the top looking cut off.
-        if (flatRoof && Math.random() < 0.45) {
-          building.appendChild(el('rect', {
-            x: x - 2, y: y - 2.5, width: w + 4, height: 3, rx: 1,
+        // A wider podium grounds a tall tower instead of letting it rise
+        // straight out of nothing.
+        if (tall > 0.55 && Math.random() < 0.4) {
+          const pod = w * rand(0.1, 0.2);
+          const podH = Math.min(h * rand(0.1, 0.18), 46);
+          building.appendChild(el('path', {
+            d: `M${x - pod} 300 V${300 - podH} H${x + w + pod} V300 Z`,
           }));
         }
 
-        if (flatRoof && Math.random() < layer.roofChance) {
-          roofKit(building, x, w, y, layer.scale);
+        // Structural piers, which is what actually reads as a tall building
+        // rather than a rectangle with dots on it.
+        if (tall > 0.5 && Math.random() < 0.34) {
+          const piers = Math.max(2, Math.round(w / 26));
+          for (let i = 1; i < piers; i++) {
+            building.appendChild(el('rect', {
+              x: x + (w / piers) * i - 1, y: y + h * 0.06,
+              width: 2, height: h * 0.9, opacity: 0.5,
+            }));
+          }
+        }
+
+        // A cornice reads as a roof edge and stops the top looking cut off.
+        if (flatRoof && roofW > 14 && Math.random() < 0.45) {
+          building.appendChild(el('rect', {
+            x: roofX - 2, y: y - 2.5, width: roofW + 4, height: 3, rx: 1,
+          }));
+        }
+
+        if (flatRoof && roofW > 20 && Math.random() < layer.roofChance) {
+          roofKit(building, roofX, roofW, y, layer.scale);
         }
 
         // Curtain-wall towers get banded glazing, older blocks punched windows.

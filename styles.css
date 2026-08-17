@@ -230,7 +230,7 @@ body{
   position: absolute;
   left: -340px;
   height: auto;
-  opacity: calc(var(--cloud-opacity, 0.85) * var(--depth, 1));
+  opacity: calc(var(--cloud-opacity, 0.85) * var(--depth, 1) * var(--wisp, 1));
   filter: brightness(var(--cloud-brightness, 1));
   transition: opacity 1.6s ease, filter 1.6s ease;
   animation-name: drift;
