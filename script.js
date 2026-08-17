@@ -5,6 +5,7 @@
     sun: document.getElementById('sun'),
     moon: document.getElementById('moon'),
     skyTraffic: document.getElementById('skyTraffic'),
+    clouds: document.getElementById('clouds'),
     eyebrow: document.getElementById('eyebrow'),
     timer: document.getElementById('timer'),
     timerLabel: document.getElementById('timerLabel'),
@@ -86,34 +87,54 @@
     return h * 60 + min;
   }
 
-  // days is indexed by Date#getDay, so 0 is Sunday. Monday to Friday by default.
-  const DEFAULT_DAYS = [false, true, true, true, true, true, false];
-  const DEFAULTS = {
-    start: 9 * 60, end: 18 * 60,
-    lunchStart: 13 * 60, lunchEnd: 14 * 60, lunchOn: false,
-    days: DEFAULT_DAYS,
-  };
+  // Every weekday carries its own hours, because a Saturday shift is rarely
+  // the same shape as a Tuesday one. Index matches Date#getDay, so 0 is Sunday.
+  const DAY_DEFAULT = { on: false, start: 9 * 60, end: 18 * 60, lunchOn: false, lunchStart: 13 * 60, lunchEnd: 14 * 60 };
+  const WORKWEEK = [false, true, true, true, true, true, false];
 
-  function parseDays(value) {
-    if (typeof value !== 'string' || !/^[01]{7}$/.test(value)) return DEFAULT_DAYS.slice();
-    return value.split('').map(c => c === '1');
+  function defaultDays() {
+    return WORKWEEK.map(on => ({ ...DAY_DEFAULT, on }));
+  }
+
+  function parseDay(raw, fallback) {
+    if (!raw || typeof raw !== 'object') return { ...fallback };
+    return {
+      on: raw.on === true,
+      start: parseStored(raw.start, fallback.start),
+      end: parseStored(raw.end, fallback.end),
+      lunchOn: raw.lunchOn === true,
+      lunchStart: parseStored(raw.lunchStart, fallback.lunchStart),
+      lunchEnd: parseStored(raw.lunchEnd, fallback.lunchEnd),
+    };
   }
 
   function loadSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
-      if (saved) {
+      if (saved && Array.isArray(saved.days) && typeof saved.days[0] === 'object') {
         return {
-          start: parseStored(saved.start, DEFAULTS.start),
-          end: parseStored(saved.end, DEFAULTS.end),
-          lunchStart: parseStored(saved.lunchStart, DEFAULTS.lunchStart),
-          lunchEnd: parseStored(saved.lunchEnd, DEFAULTS.lunchEnd),
+          uniform: saved.uniform !== false,
+          days: Array.from({ length: 7 }, (_, i) => parseDay(saved.days[i], DAY_DEFAULT)),
+        };
+      }
+      if (saved) {
+        // Migrate the single-schedule format: one set of hours, spread across
+        // whichever days the old on/off string had enabled.
+        const shared = {
+          start: parseStored(saved.start, DAY_DEFAULT.start),
+          end: parseStored(saved.end, DAY_DEFAULT.end),
           lunchOn: saved.lunchOn === true,
-          days: parseDays(saved.days),
+          lunchStart: parseStored(saved.lunchStart, DAY_DEFAULT.lunchStart),
+          lunchEnd: parseStored(saved.lunchEnd, DAY_DEFAULT.lunchEnd),
+        };
+        const flags = /^[01]{7}$/.test(saved.days || '') ? saved.days : '0111110';
+        return {
+          uniform: true,
+          days: Array.from({ length: 7 }, (_, i) => ({ ...shared, on: flags[i] === '1' })),
         };
       }
     } catch (e) { /* ignore malformed storage */ }
-    return { ...DEFAULTS, days: DEFAULT_DAYS.slice() };
+    return { uniform: true, days: defaultDays() };
   }
 
   const schedule = loadSettings();
@@ -122,15 +143,27 @@
     const toStr = (mins) => pad2(Math.floor(mins / 60)) + ':' + pad2(mins % 60);
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        start: toStr(schedule.start),
-        end: toStr(schedule.end),
-        lunchStart: toStr(schedule.lunchStart),
-        lunchEnd: toStr(schedule.lunchEnd),
-        lunchOn: schedule.lunchOn,
-        days: schedule.days.map(d => (d ? '1' : '0')).join(''),
+        uniform: schedule.uniform,
+        days: schedule.days.map(d => ({
+          on: d.on,
+          start: toStr(d.start),
+          end: toStr(d.end),
+          lunchOn: d.lunchOn,
+          lunchStart: toStr(d.lunchStart),
+          lunchEnd: toStr(d.lunchEnd),
+        })),
       }));
     } catch (e) { /* storage unavailable, continue without persistence */ }
   }
+
+  // The day whose hours the settings fields are currently editing.
+  let editingDay = new Date().getDay();
+  if (!schedule.days[editingDay].on) {
+    const firstOn = schedule.days.findIndex(d => d.on);
+    if (firstOn >= 0) editingDay = firstOn;
+  }
+
+  function editedDay() { return schedule.days[editingDay]; }
 
   // ---- 12h / 24h format ---------------------------------------------
   function loadFormat() {
@@ -173,8 +206,9 @@
 
   function renderFields() {
     els.root.setAttribute('data-clock', timeFormat);
+    const day = editedDay();
     for (const f of fields) {
-      const mins = schedule[f.key];
+      const mins = day[f.key];
       const h24 = Math.floor(mins / 60);
       const shown = timeFormat === '24' ? h24 : ((h24 % 12) || 12);
       if (document.activeElement !== f.hour) f.hour.value = pad2(shown);
@@ -187,7 +221,14 @@
   }
 
   function setField(key, mins) {
-    schedule[key] = ((mins % 1440) + 1440) % 1440;
+    const value = ((mins % 1440) + 1440) % 1440;
+    // In uniform mode one edit sets every day, including days that are
+    // currently off, so switching a day on later inherits sensible hours.
+    if (schedule.uniform) {
+      for (const day of schedule.days) day[key] = value;
+    } else {
+      editedDay()[key] = value;
+    }
     saveSettings();
     renderFields();
     adoptScheduleChange();
@@ -195,7 +236,7 @@
   }
 
   function commitHour(f) {
-    const mins = schedule[f.key];
+    const mins = editedDay()[f.key];
     const h24 = Math.floor(mins / 60);
     const typed = parseInt(f.hour.value, 10);
     if (!Number.isFinite(typed)) { renderFields(); return; }
@@ -214,7 +255,7 @@
   function commitMinute(f) {
     const typed = parseInt(f.minute.value, 10);
     if (!Number.isFinite(typed)) { renderFields(); return; }
-    const h24 = Math.floor(schedule[f.key] / 60);
+    const h24 = Math.floor(editedDay()[f.key] / 60);
     setField(f.key, h24 * 60 + clamp(typed, 0, 59));
   }
 
@@ -238,14 +279,14 @@
         if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
         e.preventDefault();
         const step = (e.key === 'ArrowUp' ? 1 : -1) * (input === f.hour ? 60 : (e.shiftKey ? 15 : 1));
-        setField(f.key, schedule[f.key] + step);
+        setField(f.key, editedDay()[f.key] + step);
         input.select();
       });
     }
 
     for (const btn of f.meridiemBtns) {
       btn.addEventListener('click', () => {
-        const mins = schedule[f.key];
+        const mins = editedDay()[f.key];
         const h24 = Math.floor(mins / 60);
         const wantPm = btn.dataset.meridiem === 'pm';
         if ((h24 >= 12) === wantPm) return;
@@ -262,13 +303,16 @@
   };
 
   function renderLunchToggle() {
-    els.root.setAttribute('data-lunch', schedule.lunchOn ? 'on' : 'off');
-    lunchEls.btn.setAttribute('aria-pressed', String(schedule.lunchOn));
-    lunchEls.label.textContent = schedule.lunchOn ? 'Lunch break on' : 'Lunch break';
+    const lunchOn = editedDay().lunchOn;
+    els.root.setAttribute('data-lunch', lunchOn ? 'on' : 'off');
+    lunchEls.btn.setAttribute('aria-pressed', String(lunchOn));
+    lunchEls.label.textContent = lunchOn ? 'Lunch break on' : 'Lunch break';
   }
 
   lunchEls.btn.addEventListener('click', () => {
-    schedule.lunchOn = !schedule.lunchOn;
+    const nextLunch = !editedDay().lunchOn;
+    if (schedule.uniform) { for (const day of schedule.days) day.lunchOn = nextLunch; }
+    else { editedDay().lunchOn = nextLunch; }
     saveSettings();
     renderLunchToggle();
     renderFields();
@@ -324,20 +368,43 @@
     { t: 1.00, top: '#10131c', bottom: '#1c2b28', accent: '#4f9c8a', stars: 1 },
   ];
 
-  // Real time-of-day sky: drives the light theme's background, independent
-  // of your work schedule. This is what the sky actually looks like now.
-  const daylightStops = [
-    { t: 0 / 24,  top: '#0a0f2c', bottom: '#171d3f' },  // midnight
-    { t: 5 / 24,  top: '#171d3f', bottom: '#3b3a5c' },  // pre-dawn
-    { t: 6 / 24,  top: '#ff9472', bottom: '#ffd9a0' },  // sunrise
-    { t: 8 / 24,  top: '#5ea7db', bottom: '#ffe3b3' },  // morning
-    { t: 12 / 24, top: '#2f8ee0', bottom: '#bfe6ff' },  // noon
-    { t: 16 / 24, top: '#3f97e0', bottom: '#cdeaff' },  // afternoon
-    { t: 18 / 24, top: '#6a4f8f', bottom: '#ff7e5f' },  // sunset
-    { t: 19 / 24, top: '#23214a', bottom: '#6b4a6f' },  // dusk
-    { t: 21 / 24, top: '#0f1330', bottom: '#262a4f' },  // night
-    { t: 24 / 24, top: '#0a0f2c', bottom: '#171d3f' },  // wraps to midnight
+  // Real sky, indexed by how high the sun is rather than by the clock. Every
+  // band below is a real lighting regime: -18 is the end of astronomical
+  // twilight, -6 the end of civil twilight, 0 the horizon itself.
+  const skyByAltitude = [
+    { at: -90, top: '#050813', bottom: '#0b1026' },  // deep night
+    { at: -18, top: '#080d22', bottom: '#121a38' },  // astronomical dark
+    { at: -12, top: '#101836', bottom: '#222b52' },  // nautical twilight
+    { at: -6,  top: '#1e2b52', bottom: '#4a3f6b' },  // civil twilight
+    { at: -3,  top: '#39396b', bottom: '#95566f' },  // the purple minutes
+    { at: 0,   top: '#5b5090', bottom: '#e87a52' },  // sun on the horizon
+    { at: 3,   top: '#6f83b6', bottom: '#f6a75d' },  // golden
+    { at: 8,   top: '#5192d2', bottom: '#ffd6a4' },  // low and warm
+    { at: 20,  top: '#3a8ede', bottom: '#c2e6ff' },  // full morning
+    { at: 45,  top: '#2b84e0', bottom: '#d2ecff' },  // midday
+    { at: 90,  top: '#2077d6', bottom: '#dbf1ff' },  // overhead
   ];
+
+  // Interpolates a stop list keyed on an arbitrary numeric field rather than
+  // a normalised 0..1, so the ramp can be written in real-world units.
+  function interpolateBy(stops, value) {
+    const v = clamp(value, stops[0].at, stops[stops.length - 1].at);
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i], b = stops[i + 1];
+      if (v >= a.at && v <= b.at) {
+        const lt = (v - a.at) / ((b.at - a.at) || 1);
+        const out = {};
+        for (const key of Object.keys(a)) {
+          if (key === 'at') continue;
+          const va = a[key], vb = b[key];
+          out[key] = (typeof va === 'string' && va[0] === '#') ? lerpColor(va, vb, lt) : lerp(va, vb, lt);
+        }
+        return out;
+      }
+    }
+    const { at: _at, ...rest } = stops[stops.length - 1];
+    return rest;
+  }
 
   // The sun's own colours warm up near the horizon and stay bright at noon.
   const sunStops = [
@@ -350,32 +417,147 @@
   function computeSky(now, workColors) {
     if (theme === 'amoled') return { top: '#000000', bottom: '#000000', stars: 0 };
     if (theme === 'light') {
-      const h = hourDecimal(now);
-      const { top, bottom } = interpolate(daylightStops, h / 24);
-      const ambient = windowOpacity(h, 6, 18, 1.25);
-      return { top, bottom, stars: 1 - ambient, ambient };
+      const altitude = solarAltitude(now);
+      const { top, bottom } = interpolateBy(skyByAltitude, altitude);
+      // Stars fade in through civil twilight and are fully out by the end of
+      // astronomical twilight, which is roughly how the eye experiences it.
+      const stars = clamp((-6 - altitude) / 12, 0, 1);
+      const ambient = clamp((altitude + 6) / 14, 0, 1);
+      return { top, bottom, stars, ambient, altitude };
     }
     return { top: workColors.top, bottom: workColors.bottom, stars: workColors.stars };
   }
 
+  // ---- Where the sun actually is --------------------------------------
+  // Sunrise and sunset come from the NOAA sunrise equation rather than a
+  // hard-coded 6-to-6, because in August the sun sets nearer 8pm almost
+  // everywhere and a fixed dawn made the whole sky read as wrong.
+  const LOCATION_KEY = 'homeStretch.location';
+  const RAD = Math.PI / 180;
+
+  function loadLocation() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOCATION_KEY));
+      if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon)) {
+        return { lat: clamp(saved.lat, -89, 89), lon: saved.lon, exact: true };
+      }
+    } catch (e) { /* fall through to the estimate */ }
+
+    // Without permission the timezone still pins longitude closely: each hour
+    // of offset is 15 degrees. Latitude cannot be inferred, so it stays at a
+    // mid-northern default until the reader offers something better.
+    const offsetHours = -new Date().getTimezoneOffset() / 60;
+    return { lat: 30, lon: clamp(offsetHours * 15, -180, 180), exact: false };
+  }
+
+  let place = loadLocation();
+
+  function daysSinceEpoch(date) {
+    // Julian day for local noon, then the 2000-01-01 offset the equation wants.
+    const utcMidday = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+    return utcMidday / 86400000 + 2440587.5 - 2451545.0 + 0.0008;
+  }
+
+  // Returns { sunrise, sunset, noon } as decimal local hours. When the sun
+  // never rises or never sets, cosH falls outside [-1, 1] and there is no
+  // crossing to report.
+  function solarEvents(date, lat, lon) {
+    const n = daysSinceEpoch(date);
+    const meanAnomaly = (357.5291 + 0.98560028 * n) % 360;
+    const m = meanAnomaly * RAD;
+    const centre = 1.9148 * Math.sin(m) + 0.02 * Math.sin(2 * m) + 0.0003 * Math.sin(3 * m);
+    const lambda = ((meanAnomaly + centre + 180 + 102.9372) % 360) * RAD;
+
+    const solarTransit = 2451545.0 + n + 0.0053 * Math.sin(m) - 0.0069 * Math.sin(2 * lambda);
+    const declination = Math.asin(Math.sin(lambda) * Math.sin(23.44 * RAD));
+    // Kept on the result so the altitude calculation can reuse it.
+    const dec = declination;
+
+    const cosH = (Math.sin(-0.833 * RAD) - Math.sin(lat * RAD) * Math.sin(declination))
+      / (Math.cos(lat * RAD) * Math.cos(declination));
+
+    // Julian day to local decimal hours, via the local midnight of this date.
+    const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const toLocalHours = (julian) => ((julian - 2440587.5) * 86400000 - localMidnight) / 3600000;
+
+    const noon = toLocalHours(solarTransit - lon / 360);
+    if (cosH > 1) return { noon, dec, sunrise: null, sunset: null, polar: 'night' };
+    if (cosH < -1) return { noon, dec, sunrise: null, sunset: null, polar: 'day' };
+
+    const hourAngle = Math.acos(cosH) / RAD / 360;
+    return {
+      noon,
+      dec,
+      sunrise: toLocalHours(solarTransit - lon / 360 - hourAngle),
+      sunset: toLocalHours(solarTransit - lon / 360 + hourAngle),
+      polar: null,
+    };
+  }
+
+  // How high the sun sits right now, in degrees above the horizon. This is
+  // what actually drives the sky's colour: the same clock hour looks utterly
+  // different in December and June, and altitude captures that for free.
+  function solarAltitude(now) {
+    const s = solarToday(now);
+    const h = hourDecimal(now);
+    const hourAngle = (h - s.noon) * 15 * RAD;
+    const lat = place.lat * RAD;
+    return Math.asin(
+      Math.sin(lat) * Math.sin(s.dec) + Math.cos(lat) * Math.cos(s.dec) * Math.cos(hourAngle)
+    ) / RAD;
+  }
+
+  let solarCache = { key: '', value: null };
+
+  function solarToday(now) {
+    const key = now.toDateString() + '|' + place.lat + '|' + place.lon;
+    if (solarCache.key !== key) {
+      solarCache = { key, value: solarEvents(now, place.lat, place.lon) };
+    }
+    return solarCache.value;
+  }
+
+  // Daylight window, falling back to a plain 6-to-6 inside the polar circles
+  // so the sky still animates through something rather than freezing.
+  function daylightWindow(now) {
+    const s = solarToday(now);
+    if (s.sunrise === null || s.sunset === null || s.sunset <= s.sunrise) {
+      return { sunrise: 6, sunset: 18, allDay: s.polar === 'day', allNight: s.polar === 'night' };
+    }
+    return { sunrise: s.sunrise, sunset: s.sunset, allDay: false, allNight: false };
+  }
+
   // ---- Sun and moon arc across the sky --------------------------------
+  // The arc is an ellipse anchored below the horizon, sized in viewport units
+  // so the dome keeps its shape from a phone to a wide desktop. Previously the
+  // path was a flat percentage sweep, which read as a shallow smear on wide
+  // screens and a near-vertical climb on narrow ones.
   function positionCelestial(el, t, opacity) {
-    el.style.left = (8 + t * 84) + '%';
-    el.style.top = (80 - Math.sin(t * Math.PI) * 64) + '%';
+    // angle runs pi to 0 across the day, so cos sweeps -1 to 1: the sun comes
+    // up on the left, peaks overhead at noon, and goes down on the right.
+    const angle = (1 - clamp(t, 0, 1)) * Math.PI;
+    const x = 50 + Math.cos(angle) * 46;
+    const y = 92 - Math.sin(angle) * 78;
+    el.style.left = x + '%';
+    el.style.top = y + '%';
     el.style.opacity = String(opacity);
   }
 
   function updateCelestial(now) {
     const h = hourDecimal(now);
+    const { sunrise, sunset } = daylightWindow(now);
+    const dayLength = Math.max(0.5, sunset - sunrise);
 
-    const sunT = clamp((h - 6) / 12, 0, 1);
-    positionCelestial(els.sun, sunT, windowOpacity(h, 6, 18, 1));
+    const sunT = clamp((h - sunrise) / dayLength, 0, 1);
+    positionCelestial(els.sun, sunT, windowOpacity(h, sunrise, sunset, 0.6));
     const sunColors = interpolate(sunStops, sunT);
     els.sun.style.setProperty('--sun-core', sunColors.core);
     els.sun.style.setProperty('--sun-ray', sunColors.ray);
 
-    const shifted = ((h - 18) + 24) % 24;
-    positionCelestial(els.moon, clamp(shifted / 12, 0, 1), windowOpacity(shifted, 0, 12, 1));
+    // The moon takes the other half of the clock, riding the same arc.
+    const nightLength = Math.max(0.5, 24 - dayLength);
+    const sinceSet = ((h - sunset) + 24) % 24;
+    positionCelestial(els.moon, clamp(sinceSet / nightLength, 0, 1), windowOpacity(sinceSet, 0, nightLength, 0.6));
   }
 
   function updateClouds(ambient) {
@@ -384,91 +566,396 @@
     els.root.style.setProperty('--bird-ink', (0.25 + 0.45 * ambient).toFixed(2));
   }
 
-  // ---- Birds and planes: spawned at random intervals, light theme only
-  // Each symbol is already cropped to its figure, so the host <svg> only needs
-  // that figure's proportions. Without this it falls back to a 300x150 box and
-  // the sprite floats letterboxed inside it.
-  const BIRD_SPRITES = [
-    { id: '#art-bird-1', viewBox: '0 0 311 108' },
-    { id: '#art-bird-2', viewBox: '0 0 377 126' },
-    { id: '#art-bird-3', viewBox: '0 0 375 166' },
-    { id: '#art-bird-4', viewBox: '0 0 343 99' },
-    { id: '#art-bird-5', viewBox: '0 0 409 145' },
+  // The city loses its colour as the light goes, and the windows take over.
+  // The two layers pull apart deliberately: the far city stays pale and blue
+  // enough to sit back, the near city goes dense. Too little separation and
+  // the skyline flattens into one grey band.
+  const cityFar = [
+    { at: 0, r: 38, g: 50, b: 78, a: 0.5 },     // night: a hint of massing
+    { at: 1, r: 132, g: 158, b: 194, a: 0.34 }, // day: washed out by distance
   ];
+  const cityNear = [
+    { at: 0, r: 10, g: 15, b: 30, a: 0.92 },
+    { at: 1, r: 62, g: 82, b: 116, a: 0.72 }, // daylight haze, not a night silhouette
+  ];
+
+  function updateSkyline(ambient, darkness) {
+    const mix = (stops) => {
+      const c = interpolateBy(stops, ambient);
+      return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${c.a.toFixed(2)})`;
+    };
+    els.root.style.setProperty('--city-far', mix(cityFar));
+    els.root.style.setProperty('--city-near', mix(cityNear));
+    // Offices light up before it is fully dark, and never quite all at once.
+    els.root.style.setProperty('--window-glow', clamp(darkness * 1.25, 0, 1).toFixed(2));
+  }
+
+  // ---- Birds and planes: spawned at random intervals, light theme only
   const PLANE_VIEWBOX = '0 0 133 88';
 
-  function isDaylightNow() {
-    const h = hourDecimal(new Date());
-    return h > 5.5 && h < 19.5;
+  // ---- Building the sky -------------------------------------------------
+  // Stars are drawn as box-shadow constellations on three elements rather than
+  // hundreds of nodes: one element carries fifty stars at no layout cost, and
+  // viewport units keep them spread as the window resizes.
+  function buildStarfield() {
+    const layers = [
+      { count: 78, size: 1, alpha: 0.5, period: 7 },
+      { count: 46, size: 1.4, alpha: 0.72, period: 9.5 },
+      { count: 20, size: 1.9, alpha: 0.92, period: 12 },
+    ];
+
+    document.querySelectorAll('.starfield').forEach((el, index) => {
+      const layer = layers[index];
+      const shadows = [];
+      for (let i = 0; i < layer.count; i++) {
+        // Weighted upward: the lower sky washes out first at dusk.
+        const y = Math.pow(Math.random(), 1.5) * 96;
+        shadows.push(`${(Math.random() * 100).toFixed(2)}vw ${y.toFixed(2)}vh 0 0 rgba(255,255,255,${layer.alpha})`);
+      }
+      el.style.width = layer.size + 'px';
+      el.style.height = layer.size + 'px';
+      el.style.boxShadow = shadows.join(',');
+      el.style.animationDuration = layer.period + 's';
+      el.style.animationDelay = (-index * 2.3) + 's';
+    });
+
+    // A handful of named-star-bright points, each twinkling on its own clock.
+    const bright = document.getElementById('brightStars');
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < 11; i++) {
+      const star = document.createElement('span');
+      star.className = 'star';
+      star.style.left = rand(4, 96).toFixed(2) + 'vw';
+      star.style.top = (Math.pow(Math.random(), 1.6) * 70 + 2).toFixed(2) + 'vh';
+      star.style.setProperty('--twinkle', rand(3.4, 7.2).toFixed(2) + 's');
+      star.style.animationDelay = (-Math.random() * 7).toFixed(2) + 's';
+      frag.appendChild(star);
+    }
+    bright.replaceChildren(frag);
   }
 
-  function launch(el, seconds, drift) {
-    el.style.animationDuration = seconds + 's';
-    el.style.setProperty('--flyer-drift', drift + 'px');
-    el.addEventListener('animationend', () => el.remove());
-    els.skyTraffic.appendChild(el);
+  // Clouds live on three depth bands. Nearer clouds are bigger, faster and
+  // more opaque, which is what sells the sky as having depth at all.
+  const CLOUD_SHAPES = [
+    { id: '#art-cloud-1', viewBox: '0 0 77 22' },
+    { id: '#art-cloud-2', viewBox: '0 0 90 32' },
+    { id: '#art-cloud-3', viewBox: '0 0 74 35' },
+    { id: '#art-cloud-4', viewBox: '0 0 78 29' },
+  ];
+
+  function buildClouds() {
+    const bands = [
+      { count: 6, width: [70, 120], speed: [200, 280], top: [2, 34], depth: 0.45 },
+      { count: 6, width: [130, 210], speed: [130, 190], top: [6, 48], depth: 0.72 },
+      { count: 4, width: [230, 330], speed: [85, 125], top: [12, 62], depth: 1 },
+    ];
+
+    const frag = document.createDocumentFragment();
+    for (const band of bands) {
+      for (let i = 0; i < band.count; i++) {
+        const shape = pick(CLOUD_SHAPES);
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+        svg.setAttribute('viewBox', shape.viewBox);
+        svg.setAttribute('class', 'cloud');
+        use.setAttribute('href', shape.id);
+        svg.appendChild(use);
+
+        const duration = rand(band.speed[0], band.speed[1]);
+        svg.style.width = rand(band.width[0], band.width[1]).toFixed(0) + 'px';
+        svg.style.top = rand(band.top[0], band.top[1]).toFixed(2) + '%';
+        svg.style.animationDuration = duration.toFixed(1) + 's';
+        // Negative delays scatter them across the sky on first paint instead
+        // of marching them all in from the left edge together.
+        svg.style.animationDelay = (-Math.random() * duration).toFixed(1) + 's';
+        svg.style.setProperty('--depth', band.depth.toFixed(2));
+        frag.appendChild(svg);
+      }
+    }
+    els.clouds.replaceChildren(frag);
   }
 
-  // Gulls travel in loose groups, so one spawn puts up a small skein.
-  function spawnFlock() {
-    const size = Math.random() < 0.45 ? 1 : Math.floor(rand(2, 5));
-    const baseTop = rand(10, 44);
-    const baseDur = rand(16, 26);
+  // ---- Skyline ----------------------------------------------------------
+  // A city drawn from rules rather than a fixed asset: two depth layers, the
+  // far one hazier and shorter, so the horizon reads as distance rather than
+  // as a band of colour. Windows are real rects, which is what lets them come
+  // on at dusk.
+  const SVGNS = 'http://www.w3.org/2000/svg';
 
-    for (let i = 0; i < size; i++) {
-      const scale = rand(0.55, 1.15);
-      const bird = document.createElement('div');
-      bird.className = 'flyer bird';
-      bird.style.top = clamp(baseTop + rand(-6, 6), 4, 52) + '%';
-      bird.style.width = (46 * scale).toFixed(1) + 'px';
-      bird.style.marginLeft = (i * rand(-70, -30)).toFixed(0) + 'px';
+  function buildSkyline() {
+    const svg = document.getElementById('skyline');
+    svg.replaceChildren();
 
-      const sprite = pick(BIRD_SPRITES);
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-      svg.setAttribute('viewBox', sprite.viewBox);
-      use.setAttribute('href', sprite.id);
-      svg.appendChild(use);
-      svg.style.animationDelay = (-Math.random() * 3.4).toFixed(2) + 's';
-      bird.appendChild(svg);
+    const layers = [
+      { klass: 'skyline__far', y: 118, minW: 46, maxW: 96, minH: 60, maxH: 150, gap: -8, windows: 0.5, step: 26 },
+      { klass: 'skyline__near', y: 168, minW: 58, maxW: 132, minH: 70, maxH: 210, gap: -14, windows: 1, step: 22 },
+    ];
 
-      launch(bird, (baseDur / scale).toFixed(1), rand(-70, 20));
+    for (const layer of layers) {
+      const group = document.createElementNS(SVGNS, 'g');
+      group.setAttribute('class', layer.klass);
+
+      let x = -40;
+      while (x < 1640) {
+        const w = rand(layer.minW, layer.maxW);
+        const h = rand(layer.minH, layer.maxH);
+        const top = 300 - layer.y - h + layer.y;
+        const y = 300 - h;
+
+        const block = document.createElementNS(SVGNS, 'path');
+        // Occasional setback shoulders and a crown, so the roofline is not a
+        // row of plain boxes.
+        const roll = Math.random();
+        let d;
+        if (roll < 0.18) {
+          const inset = w * rand(0.16, 0.28);
+          const shoulder = y + h * rand(0.12, 0.24);
+          d = `M${x} 300 V${shoulder} H${x + inset} V${y} H${x + w - inset} V${shoulder} H${x + w} V300 Z`;
+        } else if (roll < 0.3) {
+          d = `M${x} 300 V${y + 14} L${x + w / 2} ${y} L${x + w} ${y + 14} V300 Z`;
+        } else {
+          d = `M${x} 300 V${y} H${x + w} V300 Z`;
+        }
+        block.setAttribute('d', d);
+        group.appendChild(block);
+
+        // Masts on the taller towers only.
+        if (h > layer.maxH * 0.72 && Math.random() < 0.55) {
+          const mast = document.createElementNS(SVGNS, 'rect');
+          mast.setAttribute('x', (x + w / 2 - 1.5).toFixed(1));
+          mast.setAttribute('y', (y - rand(18, 40)).toFixed(1));
+          mast.setAttribute('width', '3');
+          mast.setAttribute('height', '44');
+          group.appendChild(mast);
+        }
+
+        // Window grid, inset from the edges so it reads as a facade.
+        const cols = Math.max(1, Math.floor((w - 14) / layer.step));
+        const rows = Math.max(1, Math.floor((h - 20) / layer.step));
+        const lit = document.createElementNS(SVGNS, 'g');
+        lit.setAttribute('class', 'skyline__windows');
+        for (let c = 0; c < cols; c++) {
+          for (let r = 0; r < rows; r++) {
+            if (Math.random() > layer.windows * 0.55) continue;
+            const win = document.createElementNS(SVGNS, 'rect');
+            win.setAttribute('x', (x + 9 + c * layer.step).toFixed(1));
+            win.setAttribute('y', (y + 12 + r * layer.step).toFixed(1));
+            win.setAttribute('width', '7');
+            win.setAttribute('height', '9');
+            win.setAttribute('rx', '1');
+            // Each window keeps its own brightness so the facade is not uniform.
+            win.style.setProperty('--lit', rand(0.35, 1).toFixed(2));
+            lit.appendChild(win);
+          }
+        }
+        group.appendChild(lit);
+
+        x += w + layer.gap + rand(4, 26);
+      }
+      svg.appendChild(group);
     }
   }
 
+  // Hard ceilings, so no combination of timing accidents can fill the sky.
+  const MAX_BIRDS = 26;
+  const MAX_PLANES = 2;
+
+  function isDaylightNow() {
+    return solarAltitude(new Date()) > -6;
+  }
+
+  // A background tab suspends CSS animations but keeps firing timers, so
+  // `animationend` never arrives and sprites used to stack up at the spawn
+  // point, then all set off at once on return. Every flyer now carries its own
+  // expiry, and nothing spawns while the tab is hidden.
+  function launch(el, seconds, drift) {
+    el.style.animationDuration = seconds + 's';
+    el.style.setProperty('--flyer-drift', drift + 'px');
+    const remove = () => {
+      clearTimeout(el._expiry);
+      el.remove();
+    };
+    el.addEventListener('animationend', remove);
+    el._expiry = setTimeout(remove, (Number(seconds) + 2) * 1000);
+    els.skyTraffic.appendChild(el);
+  }
+
+  function countFlyers(selector) {
+    return els.skyTraffic.querySelectorAll(selector).length;
+  }
+
+  function pickWeighted(items) {
+    const total = items.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    for (const item of items) {
+      roll -= item.weight;
+      if (roll <= 0) return item;
+    }
+    return items[items.length - 1];
+  }
+
+  const BIRD_FRAMES = ['#art-bird-down', '#art-bird-mid', '#art-bird-up', '#art-bird-mid'];
+
+  // One gull: four stacked poses, each lit for a quarter of the wingbeat.
+  function makeBird(scale) {
+    const bird = document.createElement('div');
+    bird.className = 'flyer bird';
+    bird.style.width = (52 * scale).toFixed(1) + 'px';
+    // Small birds are distant birds: they beat faster and bob less, which is
+    // what actually sells the depth.
+    bird.style.setProperty('--flap', (rand(0.58, 0.8) * (0.55 + 0.45 * scale)).toFixed(2) + 's');
+    bird.style.setProperty('--bob', rand(3, 5.2).toFixed(2) + 's');
+    bird.style.setProperty('--bob-shift', (7 * scale).toFixed(1) + 'px');
+
+    const flap = document.createElement('div');
+    flap.className = 'bird__flap';
+    BIRD_FRAMES.forEach((id, frame) => {
+      const svg = document.createElementNS(SVGNS, 'svg');
+      const use = document.createElementNS(SVGNS, 'use');
+      svg.setAttribute('viewBox', '0 0 420 220');
+      svg.setAttribute('class', 'bird__frame');
+      svg.style.animationDelay = 'calc(var(--flap) * ' + (-frame / 4).toFixed(2) + ')';
+      use.setAttribute('href', id);
+      svg.appendChild(use);
+      flap.appendChild(svg);
+    });
+    // Birds in a group are never quite in step with each other.
+    flap.style.animationDelay = (-Math.random() * 5).toFixed(2) + 's';
+    bird.appendChild(flap);
+    return bird;
+  }
+
+  // Gulls do not all travel the same way, so neither do these. A lone bird
+  // crossing high, a pair, a loose skein, or a far-off flock in a ragged V.
+  const FLOCKS = [
+    { kind: 'single', size: [1, 1], scale: [0.85, 1.25], top: [6, 46], weight: 4 },
+    { kind: 'pair', size: [2, 2], scale: [0.7, 1.0], top: [8, 44], weight: 3 },
+    { kind: 'skein', size: [3, 6], scale: [0.55, 0.9], top: [6, 40], weight: 4 },
+    { kind: 'flock', size: [10, 18], scale: [0.24, 0.42], top: [4, 26], weight: 2 },
+  ];
+
+  function spawnFlock() {
+    if (countFlyers('.bird') >= MAX_BIRDS) return;
+
+    const shape = pickWeighted(FLOCKS);
+    const size = Math.round(rand(shape.size[0], shape.size[1]));
+    const baseTop = rand(shape.top[0], shape.top[1]);
+    const baseScale = rand(shape.scale[0], shape.scale[1]);
+    const baseDur = rand(22, 36);
+    const drift = rand(-90, 30);
+
+    for (let i = 0; i < size; i++) {
+      if (countFlyers('.bird') >= MAX_BIRDS) break;
+
+      // Individuals vary around the group's size rather than being identical.
+      const scale = clamp(baseScale * rand(0.86, 1.14), 0.2, 1.35);
+      const bird = makeBird(scale);
+
+      let offsetX, offsetY;
+      if (shape.kind === 'flock') {
+        // A ragged V: two arms sweeping back from a leader, loosely held.
+        const arm = i === 0 ? 0 : (i % 2 === 1 ? -1 : 1);
+        const rank = Math.ceil(i / 2);
+        offsetX = -rank * rand(26, 40);
+        offsetY = arm * rank * rand(0.7, 1.3) + rand(-0.6, 0.6);
+      } else if (shape.kind === 'skein') {
+        offsetX = -i * rand(54, 92);
+        offsetY = i * rand(-2.6, -0.8) + rand(-1.2, 1.2);
+      } else {
+        offsetX = -i * rand(60, 110);
+        offsetY = rand(-3, 3);
+      }
+
+      bird.style.marginLeft = offsetX.toFixed(0) + 'px';
+      bird.style.top = clamp(baseTop + offsetY, 2, 56).toFixed(2) + '%';
+
+      // The whole group holds formation, so it shares one crossing time.
+      launch(bird, (baseDur / Math.max(0.5, baseScale)).toFixed(1), drift + rand(-8, 8));
+    }
+  }
+
+  // One airframe drawing wears many liveries, so the sky gets variety without
+  // another sprite for every airline.
+  const LIVERIES = [
+    { accent: '#FFCC06', body: '#FFFFFF', shade: '#CAA32D', ink: '#1B1B1B' }, // the original
+    { accent: '#E23B4C', body: '#FFFFFF', shade: '#A62634', ink: '#26262B' }, // red tail
+    { accent: '#1F6FD0', body: '#F4F8FF', shade: '#154C93', ink: '#1B2430' }, // navy
+    { accent: '#12A47E', body: '#FFFFFF', shade: '#0B7359', ink: '#1B2A28' }, // green
+    { accent: '#F07B22', body: '#FFF6EC', shade: '#B4571339', ink: '#2A2118' }, // sunset orange
+    { accent: '#6B4FD0', body: '#FAF7FF', shade: '#4A3596', ink: '#231E33' }, // violet
+    { accent: '#2C3440', body: '#E9EDF3', shade: '#1B2029', ink: '#11151B' }, // charcoal
+  ];
+
+  const AIRCRAFT = [
+    // Jets fly high and fast and leave a contrail behind them.
+    { type: 'jet', sprite: '#art-plane', viewBox: PLANE_VIEWBOX, width: [58, 112], top: [3, 22], speed: [30, 48], contrail: true, weight: 6 },
+    // Props sit lower, run slower, and leave nothing at all.
+    { type: 'prop', sprite: '#art-prop', viewBox: '0 0 140 84', width: [44, 74], top: [18, 40], speed: [22, 34], contrail: false, weight: 4 },
+  ];
+
+
   function spawnPlane() {
+    if (countFlyers('.plane') >= MAX_PLANES) return;
+
+    const kind = pickWeighted(AIRCRAFT);
+    const livery = pick(LIVERIES);
+
     const plane = document.createElement('div');
-    plane.className = 'flyer plane' + (isDaylightNow() ? '' : ' is-night');
-    plane.style.top = rand(5, 24) + '%';
-    plane.style.width = rand(74, 118).toFixed(0) + 'px';
+    plane.className = 'flyer plane plane--' + kind.type + (isDaylightNow() ? '' : ' is-night');
+    plane.style.top = rand(kind.top[0], kind.top[1]).toFixed(1) + '%';
+    plane.style.width = rand(kind.width[0], kind.width[1]).toFixed(0) + 'px';
+    plane.style.setProperty('--livery-accent', livery.accent);
+    plane.style.setProperty('--livery-body', livery.body);
+    plane.style.setProperty('--livery-shade', livery.shade);
+    plane.style.setProperty('--livery-ink', livery.ink);
+
     plane.innerHTML =
-      '<div class="plane__contrail"></div>' +
-      '<svg class="plane__art" viewBox="' + PLANE_VIEWBOX + '"><use href="#art-plane"/></svg>' +
+      (kind.contrail ? '<div class="plane__contrail"></div>' : '') +
+      '<svg class="plane__art" viewBox="' + kind.viewBox + '"><use href="#' + kind.sprite.slice(1) + '"/></svg>' +
       '<div class="plane__lights"><span class="red"></span><span class="green"></span></div>';
-    launch(plane, rand(26, 40).toFixed(1), rand(-40, -10));
+    launch(plane, rand(kind.speed[0], kind.speed[1]).toFixed(1), rand(-40, -10));
+  }
+
+  function trafficAllowed() {
+    return theme === 'light' && !reduceMotion && !document.hidden;
   }
 
   function scheduleBirds(delay) {
-    if (theme !== 'light' || reduceMotion) return;
-    birdTimeout = setTimeout(() => {
-      if (theme === 'light' && isDaylightNow()) spawnFlock();
-      scheduleBirds(rand(11000, 26000));
-    }, delay);
+    if (theme === 'light' && !reduceMotion) {
+      birdTimeout = setTimeout(() => {
+        if (trafficAllowed() && isDaylightNow()) spawnFlock();
+        scheduleBirds(rand(9000, 22000));
+      }, delay);
+    }
   }
   function schedulePlanes(delay) {
-    if (theme !== 'light' || reduceMotion) return;
-    planeTimeout = setTimeout(() => {
-      if (theme === 'light') spawnPlane();
-      schedulePlanes(rand(35000, 80000));
-    }, delay);
+    if (theme === 'light' && !reduceMotion) {
+      planeTimeout = setTimeout(() => {
+        if (trafficAllowed()) spawnPlane();
+        schedulePlanes(rand(38000, 85000));
+      }, delay);
+    }
   }
   function stopTraffic() {
     clearTimeout(birdTimeout);
     clearTimeout(planeTimeout);
     birdTimeout = null;
     planeTimeout = null;
+    for (const el of els.skyTraffic.children) clearTimeout(el._expiry);
     els.skyTraffic.replaceChildren();
   }
+
+  // Coming back to a tab that has been parked for an hour should look like a
+  // sky, not a queue. Clear whatever survived and start the schedule fresh.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopTraffic();
+    } else if (theme === 'light' && !reduceMotion) {
+      stopTraffic();
+      scheduleBirds(rand(1200, 4000));
+      schedulePlanes(rand(8000, 20000));
+    }
+  });
 
   // ---- Something to read ----------------------------------------------
   // Three flavours: a fact to chew on, a nudge to get out of the chair, and a
@@ -872,29 +1359,35 @@
     return d;
   }
 
-  // The pair of instants bounding the shift that `now` belongs to.
+  // The pair of instants bounding the shift that `now` belongs to, along with
+  // the weekday config those hours came from.
   function dayWindow(now) {
-    let start = minutesToday(schedule.start, now);
-    let end = minutesToday(schedule.end, now);
+    const todayIndex = now.getDay();
+    const today = schedule.days[todayIndex];
+    let start = minutesToday(today.start, now);
+    let end = minutesToday(today.end, now);
     if (end <= start) end = addDays(end, 1); // overnight shift
 
-    // An overnight shift that began yesterday is still running right now.
-    const prevStart = addDays(start, -1);
-    const prevEnd = addDays(end, -1);
-    if (now < start && now >= prevStart && now < prevEnd) {
-      start = prevStart;
-      end = prevEnd;
+    // A shift that began yesterday, on yesterday's hours, may still be running.
+    const yesterdayIndex = (todayIndex + 6) % 7;
+    const yesterday = schedule.days[yesterdayIndex];
+    const prevStart = addDays(minutesToday(yesterday.start, now), -1);
+    let prevEnd = addDays(minutesToday(yesterday.end, now), -1);
+    if (prevEnd <= prevStart) prevEnd = addDays(prevEnd, 1);
+
+    if (yesterday.on && now < start && now >= prevStart && now < prevEnd) {
+      return { start: prevStart, end: prevEnd, cfg: yesterday, dayIndex: yesterdayIndex };
     }
-    return { start, end };
+    return { start, end, cfg: today, dayIndex: todayIndex };
   }
 
   // Lunch as an absolute interval, anchored to the shift and clipped to it.
   // Returns null when lunch is off or falls entirely outside the workday.
-  function lunchWindow(start, end) {
-    if (!schedule.lunchOn) return null;
+  function lunchWindow(start, end, cfg) {
+    if (!cfg || !cfg.lunchOn) return null;
 
-    let ls = minutesToday(schedule.lunchStart, start);
-    let le = minutesToday(schedule.lunchEnd, start);
+    let ls = minutesToday(cfg.lunchStart, start);
+    let le = minutesToday(cfg.lunchEnd, start);
     if (le <= ls) le = addDays(le, 1);
     if (ls < start) { ls = addDays(ls, 1); le = addDays(le, 1); }
 
@@ -911,17 +1404,21 @@
   }
 
   // ---- Work days -------------------------------------------------------
-  function anyWorkDays() { return schedule.days.some(Boolean); }
+  function anyWorkDays() { return schedule.days.some(d => d.on); }
 
   // A shift belongs to the day it starts on, so an overnight Friday shift
   // still counts as Friday once the clock has rolled past midnight.
-  function isWorkDay(dayIndex) { return schedule.days[dayIndex] === true; }
+  function isWorkDay(dayIndex) { return schedule.days[dayIndex].on === true; }
 
   function nextWorkStart(now) {
     if (!anyWorkDays()) return null;
     for (let i = 0; i < 8; i++) {
-      const candidate = minutesToday(schedule.start, addDays(now, i));
-      if (candidate > now && isWorkDay(candidate.getDay())) return candidate;
+      const date = addDays(now, i);
+      const cfg = schedule.days[date.getDay()];
+      if (!cfg.on) continue;
+      // Each day opens on its own hours, not one shared clock-in time.
+      const candidate = minutesToday(cfg.start, date);
+      if (candidate > now) return candidate;
     }
     return null;
   }
@@ -951,16 +1448,14 @@
   (function buildWeekdayPicker() {
     const first = weekStartDay();
     // 4 Jan 1970 was a Sunday, which makes it a convenient index-to-name base.
-    const nameFor = (index, opts) => new Date(1970, 0, 4 + index).toLocaleDateString(undefined, opts);
-
     for (let i = 0; i < 7; i++) {
       const index = (first + i) % 7;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'weekday';
       btn.dataset.day = String(index);
-      btn.innerHTML = '<span aria-hidden="true">' + nameFor(index, { weekday: 'narrow' }) + '</span>'
-        + '<span class="sr-only">' + nameFor(index, { weekday: 'long' }) + '</span>';
+      btn.innerHTML = '<span aria-hidden="true">' + dayName(index, { weekday: 'narrow' }) + '</span>'
+        + '<span class="sr-only">' + dayName(index, { weekday: 'long' }) + '</span>';
       weekdaysEl.appendChild(btn);
       dayButtons.push(btn);
     }
@@ -972,16 +1467,188 @@
     }
   }
 
+  // ---- Hours mode: one schedule for the week, or one per day -----------
+  const hoursModeEl = document.getElementById('hoursMode');
+  const dayTabsEl = document.getElementById('dayTabs');
+
+  function dayName(index, opts) {
+    return new Date(1970, 0, 4 + index).toLocaleDateString(undefined, opts);
+  }
+
+  function renderHoursMode() {
+    for (const btn of hoursModeEl.querySelectorAll('.seg-btn')) {
+      btn.setAttribute('aria-pressed', String((btn.dataset.mode === 'uniform') === schedule.uniform));
+    }
+    dayTabsEl.hidden = schedule.uniform;
+    if (schedule.uniform) return;
+
+    // Only worked days get a tab; there are no hours to set for a day off.
+    const frag = document.createDocumentFragment();
+    schedule.days.forEach((day, index) => {
+      if (!day.on) return;
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'daytab';
+      tab.dataset.day = String(index);
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(index === editingDay));
+      tab.textContent = dayName(index, { weekday: 'short' });
+      frag.appendChild(tab);
+    });
+    dayTabsEl.replaceChildren(frag);
+  }
+
+  hoursModeEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn');
+    if (!btn) return;
+    const uniform = btn.dataset.mode === 'uniform';
+    if (uniform === schedule.uniform) return;
+
+    schedule.uniform = uniform;
+    // Switching back to one shared schedule copies the day on screen outward,
+    // rather than silently picking one of seven.
+    if (uniform) {
+      const source = editedDay();
+      for (const day of schedule.days) {
+        day.start = source.start;
+        day.end = source.end;
+        day.lunchOn = source.lunchOn;
+        day.lunchStart = source.lunchStart;
+        day.lunchEnd = source.lunchEnd;
+      }
+    }
+    saveSettings();
+    renderHoursMode();
+    renderFields();
+    renderLunchToggle();
+    adoptScheduleChange();
+    tick();
+  });
+
+  dayTabsEl.addEventListener('click', (e) => {
+    const tab = e.target.closest('.daytab');
+    if (!tab) return;
+    editingDay = Number(tab.dataset.day);
+    renderHoursMode();
+    renderFields();
+    renderLunchToggle();
+  });
+
   weekdaysEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.weekday');
     if (!btn) return;
     const index = Number(btn.dataset.day);
-    schedule.days[index] = !schedule.days[index];
+    schedule.days[index].on = !schedule.days[index].on;
+    // Keep the hours editor pointed at a day that is actually worked.
+    if (schedule.days[index].on) editingDay = index;
+    else if (!schedule.days[editingDay].on) {
+      const firstOn = schedule.days.findIndex(d => d.on);
+      if (firstOn >= 0) editingDay = firstOn;
+    }
+    renderFields();
+    renderLunchToggle();
+    renderHoursMode();
     saveSettings();
     renderWeekdays();
     adoptScheduleChange();
     tick();
   });
+
+  // ---- Week progress ---------------------------------------------------
+  // On a Wednesday afternoon the other question is how much of the week is
+  // left, so the worked days get their own row: filled behind you, hollow
+  // ahead, and the current day carries the day's own progress.
+  const weekEl = document.getElementById('week');
+  let weekSignature = '';
+
+  function renderWeek(now, todayIndex, dayProgress, isDayOff) {
+    const worked = schedule.days
+      .map((day, index) => ({ index, on: day.on }))
+      .filter(d => d.on);
+
+    // Rebuild only when the shape changes; the fill updates every tick.
+    const signature = worked.map(d => d.index).join(',') + '|' + weekStartDay();
+    if (signature !== weekSignature) {
+      weekSignature = signature;
+      const first = weekStartDay();
+      const ordered = worked.slice().sort(
+        (a, b) => ((a.index - first + 7) % 7) - ((b.index - first + 7) % 7)
+      );
+      weekEl.replaceChildren(...ordered.map(d => {
+        const mark = document.createElement('span');
+        mark.className = 'week__day';
+        mark.dataset.day = String(d.index);
+        mark.innerHTML = '<i class="week__fill"></i>';
+        return mark;
+      }));
+    }
+
+    // Where the current day sits in the week, measured from the week's start.
+    const first = weekStartDay();
+    const position = (todayIndex - first + 7) % 7;
+    for (const mark of weekEl.children) {
+      const index = Number(mark.dataset.day);
+      const at = (index - first + 7) % 7;
+      const isToday = index === todayIndex && !isDayOff;
+      const fill = at < position ? 1 : (isToday ? dayProgress : 0);
+      mark.classList.toggle('is-today', isToday);
+      mark.querySelector('.week__fill').style.transform = `scaleX(${fill.toFixed(3)})`;
+    }
+  }
+
+  // ---- Location, for an accurate sunrise and sunset --------------------
+  const locationEls = {
+    btn: document.getElementById('locationToggle'),
+    label: document.getElementById('locationLabel'),
+    note: document.getElementById('locationNote'),
+  };
+
+  function describeSun() {
+    const { sunrise, sunset } = daylightWindow(new Date());
+    const asClock = (h) => formatMinutes(Math.round(((h % 24) + 24) % 24 * 60));
+    return `Sunrise ${asClock(sunrise)}, sunset ${asClock(sunset)}.`;
+  }
+
+  function renderLocation() {
+    locationEls.btn.setAttribute('aria-pressed', String(place.exact));
+    locationEls.label.textContent = place.exact ? 'Using your location' : 'Use my location';
+    locationEls.note.textContent = place.exact
+      ? describeSun()
+      : `Estimated from your time zone. ${describeSun()}`;
+  }
+
+  if (!('geolocation' in navigator)) {
+    locationEls.btn.disabled = true;
+  } else {
+    locationEls.btn.addEventListener('click', () => {
+      if (place.exact) {
+        // Turning it off returns to the time-zone estimate and forgets the fix.
+        try { localStorage.removeItem(LOCATION_KEY); } catch (e) { /* nothing to clear */ }
+        place = loadLocation();
+        solarCache = { key: '', value: null };
+        renderLocation();
+        tick();
+        return;
+      }
+
+      locationEls.note.textContent = 'Asking your browser for a rough position...';
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          place = { lat: pos.coords.latitude, lon: pos.coords.longitude, exact: true };
+          // Only latitude and longitude are kept, and only on this device.
+          try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ lat: place.lat, lon: place.lon })); }
+          catch (e) { /* continue without persistence */ }
+          solarCache = { key: '', value: null };
+          renderLocation();
+          tick();
+        },
+        () => {
+          locationEls.note.textContent = 'Location was not shared, so the sky stays on the time-zone estimate.';
+        },
+        { timeout: 10000, maximumAge: 3600000 }
+      );
+    });
+  }
 
   // ---- Settings panel --------------------------------------------------
   // Settings is a floating dialog over a backdrop, not content inside the
@@ -1073,8 +1740,8 @@
   function tick() {
     const now = new Date();
 
-    const { start, end } = dayWindow(now);
-    const lunch = lunchWindow(start, end);
+    const { start, end, cfg } = dayWindow(now);
+    const lunch = lunchWindow(start, end, cfg);
 
     const remainingMs = end - now;
     const overMs = now - end;
@@ -1126,9 +1793,10 @@
 
     els.card.classList.toggle('is-milestone', Date.now() < flourishUntil);
     els.card.classList.toggle('is-dayoff', dayOff);
+    renderWeek(now, dayWindow(now).dayIndex, p, dayOff);
 
     // Progress bar and arc
-    els.progressFill.style.width = (p * 100).toFixed(2) + '%';
+    els.progressFill.style.transform = `scaleX(${p.toFixed(4)})`;
     els.arcFill.style.strokeDashoffset = String(pathLength * (1 - p));
     const pt = els.arcPath.getPointAtLength(pathLength * p);
     for (const dot of [els.traveler, els.travelerHalo]) {
@@ -1160,6 +1828,7 @@
     if (theme === 'light') {
       updateCelestial(now);
       updateClouds(sky.ambient ?? 1);
+      updateSkyline(sky.ambient ?? 1, sky.stars ?? 0);
     } else {
       els.sun.style.opacity = 0;
       els.moon.style.opacity = 0;
@@ -1176,7 +1845,7 @@
     const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
     els.eyebrow.textContent = `${weekday} · ${formatClock(now)}`;
 
-    let summary = `${formatMinutes(schedule.start)} to ${formatMinutes(schedule.end)}`;
+    let summary = `${formatMinutes(cfg.start)} to ${formatMinutes(cfg.end)}`;
     if (lunch) {
       const lunchMins = Math.round((lunch.end - lunch.start) / 60000);
       summary += `, minus ${formatSpan(lunchMins)} for lunch`;
@@ -1193,10 +1862,15 @@
     });
   }
 
+  buildStarfield();
+  buildClouds();
+  buildSkyline();
   renderWeekdays();
+  renderHoursMode();
   renderLunchToggle();
   renderRemind();
   renderChime();
+  renderLocation();
   setFormat(timeFormat);
   setTheme(theme);
   showTidbit(false);
