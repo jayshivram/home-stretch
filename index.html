@@ -393,7 +393,16 @@
     </div>
 
     <svg class="sun" id="sun" viewBox="0 0 468 451"><use href="#art-sun"/></svg>
-    <svg class="moon" id="moon" viewBox="0 0 100 100"><use href="#art-moon"/></svg>
+    <div class="sun__shadow" id="sunShadow"></div>
+    <div class="moon" id="moon">
+      <img class="moon__disc" id="moonDisc" src="assets/moon-phases.svg" alt="" aria-hidden="true">
+      <!-- Earth's shadow, clipped to the lunar disc. Two components, because
+           a real eclipse has both: a faint outer penumbra and a red umbra. -->
+      <div class="moon__eclipse" id="moonEclipse">
+        <div class="moon__penumbra" id="moonPenumbra"></div>
+        <div class="moon__umbra" id="moonUmbra"></div>
+      </div>
+    </div>
 
     <!-- Clouds and stars are generated, so their density can follow the
          viewport instead of being five hand-placed shapes. -->

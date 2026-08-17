@@ -4,6 +4,11 @@
     stars: document.getElementById('stars'),
     sun: document.getElementById('sun'),
     moon: document.getElementById('moon'),
+    moonDisc: document.getElementById('moonDisc'),
+    moonUmbra: document.getElementById('moonUmbra'),
+    moonPenumbra: document.getElementById('moonPenumbra'),
+    moonEclipse: document.getElementById('moonEclipse'),
+    sunShadow: document.getElementById('sunShadow'),
     skyTraffic: document.getElementById('skyTraffic'),
     clouds: document.getElementById('clouds'),
     eyebrow: document.getElementById('eyebrow'),
@@ -350,6 +355,7 @@
       scheduleBirds(rand(1500, 5000));
       schedulePlanes(rand(4000, 12000));
       scheduleMeteors(rand(20000, 60000));
+      scheduleEclipse(rand(300000, 700000));
     }
     tick();
   }
@@ -381,7 +387,9 @@
     { at: 0,   top: '#5b5090', bottom: '#e87a52' },  // sun on the horizon
     { at: 3,   top: '#6f83b6', bottom: '#f6a75d' },  // golden
     { at: 8,   top: '#5192d2', bottom: '#ffd6a4' },  // low and warm
-    { at: 20,  top: '#3a8ede', bottom: '#c2e6ff' },  // full morning
+    { at: 15,  top: '#4a90d8', bottom: '#ffe6c8' },  // the light already turning
+    { at: 26,  top: '#3a8ede', bottom: '#dcefff' },  // afternoon
+    { at: 40,  top: '#348ae0', bottom: '#d4ecff' },  // full morning
     { at: 45,  top: '#2b84e0', bottom: '#d2ecff' },  // midday
     { at: 90,  top: '#2077d6', bottom: '#dbf1ff' },  // overhead
   ];
@@ -429,10 +437,16 @@
     { at: 90,  top: '#102048', bottom: '#334a78' },
   ];
 
-  function computeSky(now, workColors) {
+  function computeSky(now, workColors, eclipsed) {
     if (theme === 'amoled') return { top: '#000000', bottom: '#000000', stars: 0 };
 
-    const altitude = solarAltitude(now);
+    let altitude = solarAltitude(now);
+    // Obscuring the sun behaves like dropping it toward the horizon. Cubed,
+    // because a partial eclipse barely dims the day: it is only the last few
+    // percent before totality that the light really goes.
+    if (eclipsed > 0 && altitude > -6) {
+      altitude -= (altitude + 6) * Math.pow(eclipsed, 3);
+    }
 
     if (theme === 'light') {
       const { top, bottom } = interpolateBy(skyByAltitude, altitude);
@@ -556,6 +570,53 @@
     return { sunrise: s.sunrise, sunset: s.sunset, allDay: false, allNight: false };
   }
 
+  // ---- Moon phase --------------------------------------------------------
+  // The supplied sheet is a 7x4 grid of 28 drawings running thin-crescent
+  // lit-on-the-left, through full, to thin-crescent lit-on-the-right. The
+  // northern-hemisphere convention is that a waxing moon is lit on the right,
+  // so the waxing half of the month reads backwards along the sheet.
+  const MOON_COLS = [120.1, 311.6, 503.1, 694.6, 886.1, 1077.6, 1269.1];
+  const MOON_ROWS = [161.3, 377.0, 587.0, 798.6];
+  const MOON_CROP = 176;
+  const SYNODIC = 29.530588853;          // days from one new moon to the next
+  const KNOWN_NEW_MOON = Date.UTC(2000, 0, 6, 18, 14);
+
+  // 0 is new, 0.25 first quarter, 0.5 full, 0.75 last quarter.
+  function moonPhase(date) {
+    const days = (date.getTime() - KNOWN_NEW_MOON) / 86400000;
+    return ((days / SYNODIC) % 1 + 1) % 1;
+  }
+
+  function moonFrame(phase) {
+    // Waxing runs 27 (thinnest, lit right) up to 14 (full); waning runs 14
+    // back down to 0 (thinnest, lit left).
+    return phase <= 0.5
+      ? Math.round(27 - (phase / 0.5) * 13)
+      : Math.round(14 - ((phase - 0.5) / 0.5) * 14);
+  }
+
+  let lastMoonFrame = -1;
+
+  function updateMoonPhase(now) {
+    let phase = moonPhase(now);
+    // A lunar eclipse can only happen at full moon, when the Earth is between
+    // the sun and the moon. Showing the umbra over a crescent would be nonsense,
+    // so the disc is full for the duration.
+    if (eclipse && eclipse.kind === 'lunar') phase = 0.5;
+
+    const frame = clamp(moonFrame(phase), 0, 27);
+    if (frame === lastMoonFrame) return;
+    lastMoonFrame = frame;
+
+    const cx = MOON_COLS[frame % 7];
+    const cy = MOON_ROWS[Math.floor(frame / 7)];
+    const disc = els.moonDisc;
+    disc.style.setProperty('--moon-x', (-((cx - MOON_CROP / 2) / MOON_CROP) * 100).toFixed(3) + '%');
+    disc.style.setProperty('--moon-y', (-((cy - MOON_CROP / 2) / MOON_CROP) * 100).toFixed(3) + '%');
+    // Glow tracks how much of the disc is actually lit.
+    disc.style.setProperty('--moon-lit', ((1 - Math.cos(phase * 2 * Math.PI)) / 2).toFixed(3));
+  }
+
   // ---- Sun and moon arc across the sky --------------------------------
   // The arc is an ellipse anchored below the horizon, sized in viewport units
   // so the dome keeps its shape from a phone to a wide desktop. Previously the
@@ -571,17 +632,28 @@
       : { horizon: 92, amplitude: 78, spread: 46 };
   }
 
-  function positionCelestial(el, t, opacity) {
-    // angle runs pi to 0 across the day, so cos sweeps -1 to 1: the body comes
-    // up on the left, peaks overhead at noon, and goes down on the right.
+  // Height comes from the real solar altitude, not from how far through the
+  // day the clock is. Those two disagree: at an hour before sunset the clock
+  // fraction put the sun almost on the horizon while the sky, which is keyed
+  // to altitude, was still painting midday blue. Sharing one source means the
+  // sun touches the horizon exactly as the sky turns orange.
+  function positionCelestial(el, t, rise, opacity) {
     const { horizon, amplitude, spread } = arcGeometry();
     const angle = (1 - clamp(t, 0, 1)) * Math.PI;
     el.style.left = (50 + Math.cos(angle) * spread) + '%';
-    el.style.top = (horizon - Math.sin(angle) * amplitude) + '%';
+    el.style.top = (horizon - clamp(rise, 0, 1) * amplitude) + '%';
     el.style.opacity = String(opacity);
   }
 
+  // How high the sun stands as a fraction of the highest it reaches today.
+  function altitudeRise(now) {
+    const s = solarToday(now);
+    const noonAltitude = 90 - Math.abs(place.lat - s.dec / RAD);
+    return solarAltitude(now) / Math.max(12, noonAltitude);
+  }
+
   function updateCelestial(now, night) {
+    updateMoonPhase(now);
     const h = hourDecimal(now);
     const { sunrise, sunset } = daylightWindow(now);
     const dayLength = Math.max(0.5, sunset - sunrise);
@@ -594,12 +666,13 @@
       const daytime = h >= sunrise && h <= sunset;
       const nightLength = Math.max(0.5, 24 - dayLength);
       const sinceSet = ((h - sunset) + 24) % 24;
-      positionCelestial(els.moon, daytime ? sunT : clamp(sinceSet / nightLength, 0, 1), 1);
+      const rise = daytime ? altitudeRise(now) : Math.sin(clamp(sinceSet / nightLength, 0, 1) * Math.PI);
+      positionCelestial(els.moon, daytime ? sunT : clamp(sinceSet / nightLength, 0, 1), rise, 1);
       els.sun.style.opacity = '0';
       return;
     }
 
-    positionCelestial(els.sun, sunT, windowOpacity(h, sunrise, sunset, 0.6));
+    positionCelestial(els.sun, sunT, altitudeRise(now), windowOpacity(h, sunrise, sunset, 0.6));
     const sunColors = interpolate(sunStops, sunT);
     els.sun.style.setProperty('--sun-core', sunColors.core);
     els.sun.style.setProperty('--sun-ray', sunColors.ray);
@@ -607,7 +680,8 @@
     // The moon takes the other half of the clock, riding the same arc.
     const nightLength = Math.max(0.5, 24 - dayLength);
     const sinceSet = ((h - sunset) + 24) % 24;
-    positionCelestial(els.moon, clamp(sinceSet / nightLength, 0, 1), windowOpacity(sinceSet, 0, nightLength, 0.6));
+    const moonT = clamp(sinceSet / nightLength, 0, 1);
+    positionCelestial(els.moon, moonT, Math.sin(moonT * Math.PI), windowOpacity(sinceSet, 0, nightLength, 0.6));
   }
 
   function updateClouds(ambient) {
@@ -806,6 +880,106 @@
       // Only worth watching against a dark sky.
       if (trafficAllowed() && isNightScene()) spawnMeteor();
       scheduleMeteors(isNightScene() ? rand(70000, 190000) : rand(240000, 420000));
+    }, delay);
+  }
+
+  // ---- Eclipses ----------------------------------------------------------
+  // Modelled on the real geometry rather than a timed fade.
+  //
+  // Lunar: the moon crosses Earth's shadow, so it can only happen at full
+  // moon. The umbra is about 2.6 lunar radii across and the penumbra about
+  // 4.6, so the shadow centre travels +/-5.6 radii from first to last contact.
+  // Those numbers alone produce the real contact order: penumbral, partial,
+  // totality, and back out again, in roughly the real proportions.
+  //
+  // Solar: the moon crosses in front of the sun, so it can only happen at new
+  // moon. Their apparent discs are almost the same size, which is why totality
+  // is a sliver of the event rather than a comfortable half of it.
+  const MOON_R = 1;
+  const UMBRA_R = 2.6 * MOON_R;
+  const PENUMBRA_R = 4.6 * MOON_R;
+  const LUNAR_SWEEP = PENUMBRA_R + MOON_R;      // 5.6 radii each side
+  const SOLAR_MOON_R = 1.03;                    // moon looks a touch bigger
+  const SOLAR_SWEEP = SOLAR_MOON_R + 1;
+
+  let eclipse = null;
+  let eclipseTimeout = null;
+
+  // Only near full for a lunar eclipse, only near new for a solar one.
+  function eclipseSeason(now) {
+    const phase = moonPhase(now);
+    if (Math.abs(phase - 0.5) < 0.035) return 'lunar';
+    if (phase < 0.035 || phase > 0.965) return 'solar';
+    return null;
+  }
+
+  function startEclipse(kind) {
+    if (eclipse) return;
+    // Compressed from the real thing: a lunar eclipse runs about five and a
+    // half hours and a solar one about three. Kept in proportion, so the
+    // stages last as long relative to each other as they really do.
+    const duration = kind === 'lunar' ? rand(11, 16) * 60000 : rand(7, 11) * 60000;
+    eclipse = { kind, start: Date.now(), duration, stage: '' };
+    if (kind === 'lunar') els.moonEclipse.classList.add('is-running');
+    else els.sunShadow.classList.add('is-running');
+  }
+
+  function endEclipse() {
+    eclipse = null;
+    els.sunShadow.classList.remove('is-running');
+    els.moonEclipse.classList.remove('is-running');
+    els.sky.classList.remove('is-totality');
+  }
+
+  // Advances the running eclipse and returns how much of the sun is covered,
+  // which is 0 for a lunar one since the daylight is unaffected.
+  function updateEclipse() {
+    if (!eclipse) return 0;
+
+    const t = (Date.now() - eclipse.start) / eclipse.duration;
+    if (t >= 1) { endEclipse(); return 0; }
+
+    if (eclipse.kind === 'lunar') {
+      // Shadow centre sweeps across in lunar radii. A percentage inside
+      // translate() resolves against the element's own width, and these
+      // shadows are several times wider than the disc, so the offset has to be
+      // divided by each one's own scale to move it by the intended distance.
+      const d = (t * 2 - 1) * LUNAR_SWEEP;
+      const shift = (radii, scale) => ((radii * 50) / scale).toFixed(2) + '%';
+      els.moonPenumbra.style.setProperty('--shadow-x', shift(d, PENUMBRA_R));
+      els.moonUmbra.style.setProperty('--shadow-x', shift(d, UMBRA_R));
+
+      const far = Math.abs(d);
+      eclipse.stage = far < UMBRA_R - MOON_R ? 'total'
+        : far < UMBRA_R + MOON_R ? 'partial'
+        : far < PENUMBRA_R + MOON_R ? 'penumbral' : '';
+      return 0;
+    }
+
+    // Solar: the moon's disc slides over the sun's.
+    const d = Math.abs((t * 2 - 1) * SOLAR_SWEEP);
+    const span = els.sun.getBoundingClientRect().width || 100;
+    els.sunShadow.style.setProperty('--eclipse-x', ((t * 2 - 1) * SOLAR_SWEEP * span * 0.5).toFixed(1) + 'px');
+    els.sunShadow.style.left = els.sun.style.left;
+    els.sunShadow.style.top = els.sun.style.top;
+
+    // Fully covered while the moon's disc contains the sun's.
+    const inner = SOLAR_MOON_R - 1;
+    const covered = d <= inner ? 1
+      : clamp(1 - (d - inner) / ((SOLAR_MOON_R + 1) - inner), 0, 1);
+    eclipse.stage = covered >= 1 ? 'total' : covered > 0 ? 'partial' : '';
+    els.sky.classList.toggle('is-totality', covered > 0.98);
+    return covered;
+  }
+
+  function scheduleEclipse(delay) {
+    if (!sceneActive()) return;
+    eclipseTimeout = setTimeout(() => {
+      const season = eclipseSeason(new Date());
+      // A solar eclipse needs the sun up to be worth anything.
+      const possible = season === 'lunar' ? isNightScene() : season === 'solar' && !isNightScene();
+      if (trafficAllowed() && !eclipse && possible) startEclipse(season);
+      scheduleEclipse(rand(240000, 600000));
     }, delay);
   }
 
@@ -1197,15 +1371,27 @@
   // Seven airframes. Altitude, speed and contrail follow the real thing: the
   // heavy metal cruises high and leaves a trail, props and helicopters work
   // low down and leave nothing.
+  // `lights` is given in each sprite's own viewBox units, not as a percentage
+  // of the element. Percentages put the tail light of a helicopter wherever
+  // the tail of an airliner happened to be, because the sprites have entirely
+  // different proportions. In viewBox space every lamp sits on the airframe.
   const AIRCRAFT = [
-    { type: 'jet', sprite: 'art-plane', viewBox: PLANE_VIEWBOX, width: [58, 106], top: [4, 20], speed: [30, 48], contrail: true, weight: 6 },
-    { type: 'jumbo', sprite: 'art-jumbo', viewBox: '0 0 186 96', width: [96, 148], top: [2, 12], speed: [44, 62], contrail: true, weight: 2 },
-    { type: 'widebody', sprite: 'art-widebody', viewBox: '0 0 168 92', width: [84, 132], top: [3, 15], speed: [40, 56], contrail: true, weight: 3 },
-    { type: 'regional', sprite: 'art-regional', viewBox: '0 0 120 88', width: [48, 74], top: [8, 26], speed: [24, 36], contrail: true, weight: 3 },
-    { type: 'bizjet', sprite: 'art-bizjet', viewBox: '0 0 112 88', width: [42, 64], top: [6, 22], speed: [20, 30], contrail: true, weight: 2 },
-    { type: 'prop', sprite: 'art-prop', viewBox: '0 0 126 96', width: [44, 70], top: [20, 40], speed: [24, 36], contrail: false, weight: 3 },
+    { type: 'jet', sprite: 'art-plane', viewBox: PLANE_VIEWBOX, width: [58, 106], top: [4, 20], speed: [30, 48], contrail: true, weight: 6,
+      lights: { red: [7, 36], green: [126, 44], strobe: [64, 56] } },
+    { type: 'jumbo', sprite: 'art-jumbo', viewBox: '0 0 186 96', width: [96, 148], top: [2, 12], speed: [44, 62], contrail: true, weight: 2,
+      lights: { red: [10, 42], green: [172, 50], strobe: [88, 64] } },
+    { type: 'widebody', sprite: 'art-widebody', viewBox: '0 0 168 92', width: [84, 132], top: [3, 15], speed: [40, 56], contrail: true, weight: 3,
+      lights: { red: [9, 39], green: [156, 47], strobe: [78, 60] } },
+    { type: 'regional', sprite: 'art-regional', viewBox: '0 0 120 88', width: [48, 74], top: [8, 26], speed: [24, 36], contrail: true, weight: 3,
+      lights: { red: [7, 36], green: [90, 44], strobe: [50, 56] } },
+    { type: 'bizjet', sprite: 'art-bizjet', viewBox: '0 0 112 88', width: [42, 64], top: [6, 22], speed: [20, 30], contrail: true, weight: 2,
+      lights: { red: [7, 36], green: [76, 44], strobe: [44, 56] } },
+    { type: 'prop', sprite: 'art-prop', viewBox: '0 0 126 96', width: [44, 70], top: [20, 40], speed: [24, 36], contrail: false, weight: 3,
+      lights: { red: [9, 40], green: [98, 48], strobe: [54, 60] } },
     // Helicopters work the low airspace over the city, slow and trail-free.
-    { type: 'heli', sprite: 'art-heli', viewBox: '0 0 200 120', width: [46, 74], top: [30, 52], speed: [26, 40], contrail: false, weight: 2 },
+    // Their beacon sits on the tail boom, not under a wing they do not have.
+    { type: 'heli', sprite: 'art-heli', viewBox: '0 0 200 120', width: [46, 74], top: [30, 52], speed: [26, 40], contrail: false, weight: 2,
+      lights: { red: [16, 66], green: [162, 70], strobe: [104, 96] } },
   ];
 
 
@@ -1228,10 +1414,18 @@
     plane.style.setProperty('--livery-shade', livery.shade);
     plane.style.setProperty('--livery-ink', livery.ink);
 
+    // Lights are drawn into an overlay that shares the artwork's viewBox, so
+    // their coordinates are airframe coordinates and hold at any rendered size.
+    const L = kind.lights;
+    const r = (Number(kind.viewBox.split(' ')[2]) / 46).toFixed(2);
+    const lamp = (cls, at) => `<circle class="nav nav--${cls}" cx="${at[0]}" cy="${at[1]}" r="${r}"/>`;
+
     plane.innerHTML =
       (kind.contrail ? '<div class="plane__contrail"></div>' : '') +
       '<svg class="plane__art" viewBox="' + kind.viewBox + '"><use href="#' + kind.sprite + '"/></svg>' +
-      '<div class="plane__lights"><span class="red"></span><span class="green"></span><span class="strobe"></span></div>';
+      '<svg class="plane__lights" viewBox="' + kind.viewBox + '">' +
+        lamp('red', L.red) + lamp('green', L.green) + lamp('strobe', L.strobe) +
+      '</svg>';
     launch(plane, rand(kind.speed[0], kind.speed[1]).toFixed(1), rand(-40, -10));
   }
 
@@ -1265,9 +1459,12 @@
     clearTimeout(birdTimeout);
     clearTimeout(planeTimeout);
     clearTimeout(meteorTimeout);
+    clearTimeout(eclipseTimeout);
+    endEclipse();
     birdTimeout = null;
     planeTimeout = null;
     meteorTimeout = null;
+    eclipseTimeout = null;
     for (const el of els.skyTraffic.children) clearTimeout(el._expiry);
     els.skyTraffic.replaceChildren();
   }
@@ -1282,6 +1479,7 @@
       scheduleBirds(rand(1200, 4000));
       schedulePlanes(rand(5000, 14000));
       scheduleMeteors(rand(18000, 55000));
+      scheduleEclipse(rand(240000, 620000));
     }
   });
 
@@ -2220,7 +2418,11 @@
     els.root.style.setProperty('--accent', workColors.accent);
 
     // Sky: work-progress driven (dark), flat black (AMOLED), or real time of day (light)
-    const sky = computeSky(now, workColors);
+    const eclipseDepth = updateEclipse();
+    // A deep solar eclipse is not just darker daylight, it looks like dusk.
+    // Feeding the coverage back into the sun's altitude walks the sky down its
+    // own ramp toward civil twilight, so colour, stars and city all follow.
+    const sky = computeSky(now, workColors, eclipseDepth);
     els.sky.style.setProperty('--sky-top', sky.top);
     els.sky.style.setProperty('--sky-bottom', sky.bottom);
     els.stars.style.setProperty('--stars-opacity', sky.stars.toFixed(2));

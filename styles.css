@@ -205,10 +205,106 @@ body{
   to{ transform: rotate(360deg); }
 }
 
+/* The moon is a window onto one cell of the phase sheet. Cropping a real
+   drawing keeps the craters and the soft terminator that a generated shape
+   would not have. */
 .moon{
-  width: clamp(38px, 6.5vmin, 62px);
-  height: auto;
-  filter: drop-shadow(0 0 20px rgba(220, 230, 250, 0.5));
+  width: clamp(44px, 7.5vmin, 74px);
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+
+.moon__disc{
+  position: absolute;
+  /* 1400x980 sheet shown through a 176-unit square window. */
+  width: 795.45%;
+  height: 556.82%;
+  left: var(--moon-x, 0%);
+  top: var(--moon-y, 0%);
+  /* drop-shadow follows the artwork's own alpha, so a crescent glows as a
+     crescent instead of carrying a full disc of light around it. */
+  filter: drop-shadow(0 0 calc(3px + 13px * var(--moon-lit, 1)) rgba(214, 228, 255, calc(0.25 + 0.5 * var(--moon-lit, 1))));
+}
+
+/* ---------------------------------------
+   Eclipses
+--------------------------------------- */
+/* Solar: the moon's disc tracks across the sun. It is opaque and matches the
+   sun's size, so at totality only the corona is left showing round the edge. */
+.sun__shadow{
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(74px, 13vmin, 150px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #0b1020;
+  transform: translate(calc(-50% + var(--eclipse-x, 0px)), -50%);
+  opacity: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 2;
+}
+:root:not([data-theme="amoled"]) .sun__shadow{ display: block; }
+.sun__shadow.is-running{ opacity: 1; }
+
+/* Totality: the sky loses its light and the corona flares. */
+.sky.is-totality .sun{
+  filter: drop-shadow(0 0 60px rgba(255, 236, 190, 0.95))
+          drop-shadow(0 0 150px rgba(255, 220, 150, 0.6));
+}
+
+/* Lunar: the Earth's shadow crossing the disc. The umbra is scaled to 2.6
+   lunar radii and the penumbra to 4.6, which is roughly the real geometry, so
+   the contact timings come out of the sweep rather than being invented. The
+   umbra is red because the only light reaching it has been bent through our
+   atmosphere, losing everything but the long wavelengths. */
+.moon__eclipse{
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  /* The drawn disc fills about 91% of its cell, so the clip matches that. */
+  width: 91.5%;
+  height: 91.5%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.2s ease;
+}
+.moon__eclipse.is-running{ opacity: 1; }
+
+.moon__penumbra,
+.moon__umbra{
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  /* Multiply keeps the craters visible through the shadow. */
+  mix-blend-mode: multiply;
+  transform: translate(calc(-50% + var(--shadow-x, -300%)), -50%);
+}
+
+/* Penumbra: 4.6 lunar radii across, a soft grey falloff. */
+.moon__penumbra{
+  width: 460%;
+  height: 460%;
+  background: radial-gradient(circle,
+    rgba(96, 96, 116, 0.55) 55%,
+    rgba(120, 120, 140, 0.28) 82%,
+    rgba(160, 160, 180, 0) 100%);
+}
+
+/* Umbra: 2.6 lunar radii across, deep and red. */
+.moon__umbra{
+  width: 260%;
+  height: 260%;
+  background: radial-gradient(circle,
+    rgba(122, 28, 16, 0.96) 50%,
+    rgba(96, 26, 18, 0.92) 76%,
+    rgba(78, 34, 30, 0.7) 92%,
+    rgba(90, 60, 60, 0.25) 100%);
 }
 
 /* ---------------------------------------
@@ -383,40 +479,31 @@ body{
 
 /* Aircraft run their nav lights in daylight too, they just barely read
    against a bright sky. So they are always on, and night simply turns the
-   glow up rather than switching them into existence. */
+   glow up rather than switching them into existence.
+
+   The lamps live in an SVG that shares the artwork's viewBox. They used to be
+   absolutely positioned divs at fixed percentages, which put a helicopter's
+   tail light wherever an airliner's tail happened to fall, since the sprites
+   have completely different proportions. */
 .plane__lights{
-  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: auto;
+  overflow: visible;
   opacity: var(--nav-opacity, 0.5);
   transition: opacity 1.2s ease;
 }
 .plane.is-night .plane__lights{ --nav-opacity: 1; }
 
-.plane__lights span{
-  position: absolute;
-  width: var(--nav-size, 3px);
-  height: var(--nav-size, 3px);
-  border-radius: 50%;
-  box-shadow: 0 0 var(--nav-glow, 2px) var(--nav-spread, 0px) currentColor;
-}
-.plane.is-night .plane__lights span{
-  --nav-size: 4px;
-  --nav-glow: 7px;
-  --nav-spread: 1px;
-}
+.nav--red{ fill: #ff5252; animation: blink 1.4s steps(1) infinite; }
+.nav--green{ fill: #4dff9a; animation: blink 1.4s steps(1) infinite reverse; }
+.nav--strobe{ fill: #ffffff; animation: strobe 2.4s linear infinite; }
 
-.plane__lights .red{ left: 4%; top: 42%; color: #ff5252; background: currentColor; animation: blink 1.4s steps(1) infinite; }
-.plane__lights .green{ right: 6%; top: 52%; color: #4dff9a; background: currentColor; animation: blink 1.4s steps(1) infinite reverse; }
-.plane__lights .strobe{
-  left: 50%; top: 62%;
-  color: #fff;
-  background: currentColor;
-  animation: strobe 2.4s linear infinite;
-}
-.plane.is-night .plane__lights .strobe{
-  --nav-size: 5px;
-  --nav-glow: 10px;
-  --nav-spread: 3px;
-}
+/* Night is the only time the halo is worth the paint. */
+.plane.is-night .nav--red{ filter: drop-shadow(0 0 3px #ff5252); }
+.plane.is-night .nav--green{ filter: drop-shadow(0 0 3px #4dff9a); }
+.plane.is-night .nav--strobe{ filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.95)); }
 
 @keyframes fly-across{
   from{ transform: translate(0, 0); }
@@ -438,8 +525,7 @@ body{
   left: 92%;
   background: linear-gradient(270deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.7) 100%);
 }
-.flyer.is-westbound .plane__lights .red{ left: auto; right: 4%; }
-.flyer.is-westbound .plane__lights .green{ right: auto; left: 6%; }
+.flyer.is-westbound .plane__lights{ transform: scaleX(-1); }
 
 @keyframes fly-across-west{
   from{ transform: translate(0, 0); }
