@@ -1199,7 +1199,9 @@ body{
   border-radius: 3px;
   background: var(--track-bg);
   overflow: hidden;
-  transition: background 0.6s ease, height 0.3s ease;
+  /* Height is not transitioned: it only changes when the day rolls over, so
+     animating it would relayout the row for no visible benefit. */
+  transition: background 0.6s ease;
 }
 
 .week__fill{
