@@ -188,104 +188,190 @@
     </symbol>
 
     <!-- The four supplied clouds are all stacked bars, so these add the other
-         two things a real sky has: billowed cumulus and thin cirrus. -->
+         two things a real sky has: billowed cumulus and thin cirrus. All of
+         them shade with --cloud-body / --cloud-shade so the palette is set
+         once in CSS rather than baked into every path. -->
     <symbol id="art-cloud-5" viewBox="0 0 128 64">
-      <g fill="#FFFFFF">
+      <g fill="var(--cloud-body, #ffffff)">
         <circle cx="40" cy="32" r="18"/>
         <circle cx="66" cy="24" r="22"/>
         <circle cx="92" cy="34" r="16"/>
         <rect x="20" y="38" width="88" height="17" rx="8.5"/>
       </g>
-      <rect fill="#B6E4F5" x="30" y="46" width="62" height="7" rx="3.5"/>
+      <rect fill="var(--cloud-shade, #dfeaf6)" x="30" y="46" width="62" height="7" rx="3.5"/>
     </symbol>
 
     <symbol id="art-cloud-6" viewBox="0 0 168 74">
-      <g fill="#FFFFFF">
+      <g fill="var(--cloud-body, #ffffff)">
         <circle cx="46" cy="40" r="20"/>
         <circle cx="76" cy="26" r="25"/>
         <circle cx="110" cy="32" r="21"/>
         <circle cx="136" cy="44" r="15"/>
         <rect x="24" y="46" width="126" height="19" rx="9.5"/>
       </g>
-      <g fill="#B6E4F5">
+      <g fill="var(--cloud-shade, #dfeaf6)">
         <rect x="36" y="55" width="86" height="8" rx="4"/>
         <circle cx="76" cy="22" r="12" opacity="0.55"/>
       </g>
     </symbol>
 
     <symbol id="art-cloud-7" viewBox="0 0 180 44">
-      <g fill="#FFFFFF">
+      <g fill="var(--cloud-body, #ffffff)">
         <rect x="8" y="16" width="96" height="5" rx="2.5"/>
         <rect x="38" y="25" width="74" height="4" rx="2"/>
         <rect x="66" y="8" width="70" height="4" rx="2"/>
         <rect x="96" y="31" width="52" height="3.5" rx="1.75"/>
       </g>
-      <g fill="#B6E4F5">
+      <g fill="var(--cloud-shade, #dfeaf6)">
         <rect x="52" y="20" width="58" height="3" rx="1.5"/>
         <rect x="110" y="12" width="42" height="3" rx="1.5"/>
       </g>
     </symbol>
 
     <symbol id="art-cloud-8" viewBox="0 0 84 42">
-      <g fill="#FFFFFF">
+      <g fill="var(--cloud-body, #ffffff)">
         <circle cx="28" cy="22" r="13"/>
         <circle cx="50" cy="17" r="15"/>
         <rect x="14" y="24" width="56" height="11" rx="5.5"/>
       </g>
-      <rect fill="#1FC4F4" x="22" y="29" width="34" height="5" rx="2.5" opacity="0.75"/>
+      <rect fill="var(--cloud-shade-deep, #c7d9ec)" x="22" y="29" width="34" height="5" rx="2.5" opacity="0.75"/>
     </symbol>
 
     <symbol id="art-cloud-9" viewBox="0 0 150 52">
-      <g fill="#FFFFFF">
+      <g fill="var(--cloud-body, #ffffff)">
         <rect x="10" y="20" width="72" height="11" rx="5.5"/>
         <rect x="40" y="10" width="86" height="12" rx="6"/>
         <rect x="26" y="32" width="104" height="10" rx="5"/>
       </g>
-      <g fill="#B6E4F5">
+      <g fill="var(--cloud-shade, #dfeaf6)">
         <rect x="56" y="14" width="52" height="5" rx="2.5"/>
         <rect x="44" y="35" width="66" height="4" rx="2"/>
       </g>
     </symbol>
 
     <symbol id="art-cloud-1" viewBox="45 108 77 22">
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M49.7,113.4h67.2c1.7,0,3.2,1.4,3.2,3.2v0c0,1.7-1.4,3.2-3.2,3.2H49.7c-1.7,0-3.2-1.4-3.2-3.2v0C46.6,114.8,48,113.4,49.7,113.4"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M66.3,122.9h35.1c-0.9,0-1.6-0.7-1.6-1.6c0-0.9,0.7-1.6,1.6-1.6H66.3c0.9,0,1.6,0.7,1.6,1.6C67.9,122.2,67.1,122.9,66.3,122.9"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M59.7,127.9h50.1c1.4,0,2.5-1.1,2.5-2.5c0-1.4-1.1-2.5-2.5-2.5H59.7c-1.4,0-2.5,1.1-2.5,2.5C57.2,126.7,58.3,127.9,59.7,127.9"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M75.9,118.3h37.4c1,0,1.8-0.8,1.8-1.8v0c0-1-0.8-1.8-1.8-1.8H75.9c-1,0-1.8,0.8-1.8,1.8v0C74.2,117.5,74.9,118.3,75.9,118.3"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M85.1,113h19.6c-0.5,0-0.9,0.4-0.9,0.9c0,0.5,0.4,0.9,0.9,0.9H85.1c0.5,0,0.9-0.4,0.9-0.9C86,113.4,85.6,113,85.1,113"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M81.5,110.2h27.9c0.8,0,1.4,0.6,1.4,1.4v0c0,0.8-0.6,1.4-1.4,1.4H81.5c-0.8,0-1.4-0.6-1.4-1.4v0C80.1,110.8,80.7,110.2,81.5,110.2"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M49.7,113.4h67.2c1.7,0,3.2,1.4,3.2,3.2v0c0,1.7-1.4,3.2-3.2,3.2H49.7c-1.7,0-3.2-1.4-3.2-3.2v0C46.6,114.8,48,113.4,49.7,113.4"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M66.3,122.9h35.1c-0.9,0-1.6-0.7-1.6-1.6c0-0.9,0.7-1.6,1.6-1.6H66.3c0.9,0,1.6,0.7,1.6,1.6C67.9,122.2,67.1,122.9,66.3,122.9"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M59.7,127.9h50.1c1.4,0,2.5-1.1,2.5-2.5c0-1.4-1.1-2.5-2.5-2.5H59.7c-1.4,0-2.5,1.1-2.5,2.5C57.2,126.7,58.3,127.9,59.7,127.9"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M75.9,118.3h37.4c1,0,1.8-0.8,1.8-1.8v0c0-1-0.8-1.8-1.8-1.8H75.9c-1,0-1.8,0.8-1.8,1.8v0C74.2,117.5,74.9,118.3,75.9,118.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M85.1,113h19.6c-0.5,0-0.9,0.4-0.9,0.9c0,0.5,0.4,0.9,0.9,0.9H85.1c0.5,0,0.9-0.4,0.9-0.9C86,113.4,85.6,113,85.1,113"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M81.5,110.2h27.9c0.8,0,1.4,0.6,1.4,1.4v0c0,0.8-0.6,1.4-1.4,1.4H81.5c-0.8,0-1.4-0.6-1.4-1.4v0C80.1,110.8,80.7,110.2,81.5,110.2"/>
     </symbol>
 
     <symbol id="art-cloud-2" viewBox="231 106 90 32">
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M235.3,120.8h67.2c1.7,0,3.2,1.4,3.2,3.2v0c0,1.7-1.4,3.2-3.2,3.2h-67.2c-1.7,0-3.2-1.4-3.2-3.2v0C232.2,122.2,233.6,120.8,235.3,120.8"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M251.9,130.3H287c-0.9,0-1.6-0.7-1.6-1.6c0-0.9,0.7-1.6,1.6-1.6h-35.1c0.9,0,1.6,0.7,1.6,1.6C253.5,129.6,252.7,130.3,251.9,130.3"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M245.3,135.3h50.1c1.4,0,2.5-1.1,2.5-2.5c0-1.4-1.1-2.5-2.5-2.5h-50.1c-1.4,0-2.5,1.1-2.5,2.5C242.8,134.2,243.9,135.3,245.3,135.3"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M259.6,108h56.7c1.5,0,2.7,1.2,2.7,2.7v0c0,1.5-1.2,2.7-2.7,2.7h-56.7c-1.5,0-2.7-1.2-2.7-2.7v0C256.9,109.2,258.1,108,259.6,108"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M273.5,116h29.6c-0.7,0-1.3-0.6-1.3-1.3c0-0.7,0.6-1.3,1.3-1.3h-29.6c0.7,0,1.3,0.6,1.3,1.3C274.9,115.4,274.3,116,273.5,116"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M268,120.2h42.2c1.2,0,2.1-0.9,2.1-2.1v0c0-1.2-0.9-2.1-2.1-2.1H268c-1.2,0-2.1,0.9-2.1,2.1v0C265.9,119.3,266.8,120.2,268,120.2"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M235.3,120.8h67.2c1.7,0,3.2,1.4,3.2,3.2v0c0,1.7-1.4,3.2-3.2,3.2h-67.2c-1.7,0-3.2-1.4-3.2-3.2v0C232.2,122.2,233.6,120.8,235.3,120.8"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M251.9,130.3H287c-0.9,0-1.6-0.7-1.6-1.6c0-0.9,0.7-1.6,1.6-1.6h-35.1c0.9,0,1.6,0.7,1.6,1.6C253.5,129.6,252.7,130.3,251.9,130.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M245.3,135.3h50.1c1.4,0,2.5-1.1,2.5-2.5c0-1.4-1.1-2.5-2.5-2.5h-50.1c-1.4,0-2.5,1.1-2.5,2.5C242.8,134.2,243.9,135.3,245.3,135.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M259.6,108h56.7c1.5,0,2.7,1.2,2.7,2.7v0c0,1.5-1.2,2.7-2.7,2.7h-56.7c-1.5,0-2.7-1.2-2.7-2.7v0C256.9,109.2,258.1,108,259.6,108"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M273.5,116h29.6c-0.7,0-1.3-0.6-1.3-1.3c0-0.7,0.6-1.3,1.3-1.3h-29.6c0.7,0,1.3,0.6,1.3,1.3C274.9,115.4,274.3,116,273.5,116"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M268,120.2h42.2c1.2,0,2.1-0.9,2.1-2.1v0c0-1.2-0.9-2.1-2.1-2.1H268c-1.2,0-2.1,0.9-2.1,2.1v0C265.9,119.3,266.8,120.2,268,120.2"/>
     </symbol>
 
     <symbol id="art-cloud-3" viewBox="237 183 74 35">
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M267,184.6c-5.4,0-10.1,3.4-11.8,8.3c-0.6-0.1-1.2-0.2-1.8-0.2c-3.7,0-6.9,2.4-8.1,5.7c-0.3-0.1-0.7-0.1-1-0.1c-3.2,0-5.7,2.6-5.7,5.7c0,3.2,2.6,5.7,5.7,5.7c7.6,0,15,0,22.7,0c7,0,12.6-5.6,12.6-12.6C279.6,190.3,273.9,184.6,267,184.6"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M307.2,206.3h-44.4c-1.2,0-2.1-0.9-2.1-2.1c0-1.2,0.9-2.1,2.1-2.1h44.4c1.2,0,2.1,0.9,2.1,2.1C309.3,205.4,308.4,206.3,307.2,206.3"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M296.3,200h-23.2c0.6,0,1.1,0.5,1.1,1.1v0c0,0.6-0.5,1.1-1.1,1.1h23.2c-0.6,0-1.1-0.5-1.1-1.1v0C295.3,200.5,295.7,200,296.3,200"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M300.7,196.7h-33.1c-0.9,0-1.6,0.7-1.6,1.6v0c0,0.9,0.7,1.6,1.6,1.6h33.1c0.9,0,1.6-0.7,1.6-1.6v0C302.3,197.4,301.6,196.7,300.7,196.7"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M290.1,206.3h-44.4c-1.2,0-2.1,0.9-2.1,2.1c0,1.2,0.9,2.1,2.1,2.1h44.4c1.2,0,2.1-0.9,2.1-2.1C292.2,207.2,291.3,206.3,290.1,206.3"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M279.2,212.6H256c0.6,0,1.1-0.5,1.1-1.1v0c0-0.6-0.5-1.1-1.1-1.1h23.2c-0.6,0-1.1,0.5-1.1,1.1v0C278.1,212.1,278.6,212.6,279.2,212.6"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M283.5,215.9h-33.1c-0.9,0-1.6-0.7-1.6-1.6v0c0-0.9,0.7-1.6,1.6-1.6h33.1c0.9,0,1.6,0.7,1.6,1.6v0C285.2,215.2,284.4,215.9,283.5,215.9"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M267,184.6c-5.4,0-10.1,3.4-11.8,8.3c-0.6-0.1-1.2-0.2-1.8-0.2c-3.7,0-6.9,2.4-8.1,5.7c-0.3-0.1-0.7-0.1-1-0.1c-3.2,0-5.7,2.6-5.7,5.7c0,3.2,2.6,5.7,5.7,5.7c7.6,0,15,0,22.7,0c7,0,12.6-5.6,12.6-12.6C279.6,190.3,273.9,184.6,267,184.6"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M307.2,206.3h-44.4c-1.2,0-2.1-0.9-2.1-2.1c0-1.2,0.9-2.1,2.1-2.1h44.4c1.2,0,2.1,0.9,2.1,2.1C309.3,205.4,308.4,206.3,307.2,206.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M296.3,200h-23.2c0.6,0,1.1,0.5,1.1,1.1v0c0,0.6-0.5,1.1-1.1,1.1h23.2c-0.6,0-1.1-0.5-1.1-1.1v0C295.3,200.5,295.7,200,296.3,200"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M300.7,196.7h-33.1c-0.9,0-1.6,0.7-1.6,1.6v0c0,0.9,0.7,1.6,1.6,1.6h33.1c0.9,0,1.6-0.7,1.6-1.6v0C302.3,197.4,301.6,196.7,300.7,196.7"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M290.1,206.3h-44.4c-1.2,0-2.1,0.9-2.1,2.1c0,1.2,0.9,2.1,2.1,2.1h44.4c1.2,0,2.1-0.9,2.1-2.1C292.2,207.2,291.3,206.3,290.1,206.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M279.2,212.6H256c0.6,0,1.1-0.5,1.1-1.1v0c0-0.6-0.5-1.1-1.1-1.1h23.2c-0.6,0-1.1,0.5-1.1,1.1v0C278.1,212.1,278.6,212.6,279.2,212.6"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M283.5,215.9h-33.1c-0.9,0-1.6-0.7-1.6-1.6v0c0-0.9,0.7-1.6,1.6-1.6h33.1c0.9,0,1.6,0.7,1.6,1.6v0C285.2,215.2,284.4,215.9,283.5,215.9"/>
     </symbol>
 
     <symbol id="art-cloud-4" viewBox="20 172 78 29">
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M49,173.3c3.5,0,6.5,2.2,7.6,5.3c0.4-0.1,0.8-0.1,1.1-0.1c2.4,0,4.5,1.5,5.2,3.7c0.2,0,0.4-0.1,0.7-0.1c2,0,3.7,1.7,3.7,3.7c0,2-1.7,3.7-3.7,3.7c-4.9,0-9.7,0-14.7,0c-4.5,0-8.1-3.6-8.1-8.1C40.8,176.9,44.5,173.3,49,173.3"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M22.9,187.3h28.7c0.7,0,1.4-0.6,1.4-1.4v0c0-0.7-0.6-1.4-1.4-1.4H22.9c-0.7,0-1.4,0.6-1.4,1.4v0C21.6,186.7,22.2,187.3,22.9,187.3"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M30,183.2h15c-0.4,0-0.7,0.3-0.7,0.7c0,0.4,0.3,0.7,0.7,0.7H30c0.4,0,0.7-0.3,0.7-0.7C30.7,183.5,30.4,183.2,30,183.2"/>
-      <path fill-rule="evenodd" fill="#1FC4F4" d="M27.2,181.1h21.4c0.6,0,1.1,0.5,1.1,1.1c0,0.6-0.5,1.1-1.1,1.1H27.2c-0.6,0-1.1-0.5-1.1-1.1C26.1,181.5,26.6,181.1,27.2,181.1"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M34,187.3h28.7c0.7,0,1.4,0.6,1.4,1.4v0c0,0.7-0.6,1.4-1.4,1.4H34c-0.7,0-1.4-0.6-1.4-1.4v0C32.7,187.9,33.3,187.3,34,187.3"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M41.1,191.3h15c-0.4,0-0.7-0.3-0.7-0.7c0-0.4,0.3-0.7,0.7-0.7h-15c0.4,0,0.7,0.3,0.7,0.7C41.8,191,41.5,191.3,41.1,191.3"/>
-      <path fill-rule="evenodd" fill="#B6E4F5" d="M38.3,193.5h21.4c0.6,0,1.1-0.5,1.1-1.1c0-0.6-0.5-1.1-1.1-1.1H38.3c-0.6,0-1.1,0.5-1.1,1.1C37.2,193,37.7,193.5,38.3,193.5"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M49.7,189.1h43.9c1.1,0,2.1,0.9,2.1,2.1v0c0,1.1-0.9,2.1-2.1,2.1H49.7c-1.1,0-2.1-0.9-2.1-2.1v0C47.6,190,48.5,189.1,49.7,189.1"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M60.4,195.3h22.9c-0.6,0-1-0.5-1-1c0-0.6,0.5-1,1-1H60.4c0.6,0,1,0.5,1,1C61.5,194.8,61,195.3,60.4,195.3"/>
-      <path fill-rule="evenodd" fill="#FFFFFF" d="M56.2,198.5h32.7c0.9,0,1.6-0.7,1.6-1.6c0-0.9-0.7-1.6-1.6-1.6H56.2c-0.9,0-1.6,0.7-1.6,1.6C54.5,197.8,55.3,198.5,56.2,198.5"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M49,173.3c3.5,0,6.5,2.2,7.6,5.3c0.4-0.1,0.8-0.1,1.1-0.1c2.4,0,4.5,1.5,5.2,3.7c0.2,0,0.4-0.1,0.7-0.1c2,0,3.7,1.7,3.7,3.7c0,2-1.7,3.7-3.7,3.7c-4.9,0-9.7,0-14.7,0c-4.5,0-8.1-3.6-8.1-8.1C40.8,176.9,44.5,173.3,49,173.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M22.9,187.3h28.7c0.7,0,1.4-0.6,1.4-1.4v0c0-0.7-0.6-1.4-1.4-1.4H22.9c-0.7,0-1.4,0.6-1.4,1.4v0C21.6,186.7,22.2,187.3,22.9,187.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M30,183.2h15c-0.4,0-0.7,0.3-0.7,0.7c0,0.4,0.3,0.7,0.7,0.7H30c0.4,0,0.7-0.3,0.7-0.7C30.7,183.5,30.4,183.2,30,183.2"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade-deep, #c7d9ec)" d="M27.2,181.1h21.4c0.6,0,1.1,0.5,1.1,1.1c0,0.6-0.5,1.1-1.1,1.1H27.2c-0.6,0-1.1-0.5-1.1-1.1C26.1,181.5,26.6,181.1,27.2,181.1"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M34,187.3h28.7c0.7,0,1.4,0.6,1.4,1.4v0c0,0.7-0.6,1.4-1.4,1.4H34c-0.7,0-1.4-0.6-1.4-1.4v0C32.7,187.9,33.3,187.3,34,187.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M41.1,191.3h15c-0.4,0-0.7-0.3-0.7-0.7c0-0.4,0.3-0.7,0.7-0.7h-15c0.4,0,0.7,0.3,0.7,0.7C41.8,191,41.5,191.3,41.1,191.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-shade, #dfeaf6)" d="M38.3,193.5h21.4c0.6,0,1.1-0.5,1.1-1.1c0-0.6-0.5-1.1-1.1-1.1H38.3c-0.6,0-1.1,0.5-1.1,1.1C37.2,193,37.7,193.5,38.3,193.5"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M49.7,189.1h43.9c1.1,0,2.1,0.9,2.1,2.1v0c0,1.1-0.9,2.1-2.1,2.1H49.7c-1.1,0-2.1-0.9-2.1-2.1v0C47.6,190,48.5,189.1,49.7,189.1"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M60.4,195.3h22.9c-0.6,0-1-0.5-1-1c0-0.6,0.5-1,1-1H60.4c0.6,0,1,0.5,1,1C61.5,194.8,61,195.3,60.4,195.3"/>
+      <path fill-rule="evenodd" fill="var(--cloud-body, #ffffff)" d="M56.2,198.5h32.7c0.9,0,1.6-0.7,1.6-1.6c0-0.9-0.7-1.6-1.6-1.6H56.2c-0.9,0-1.6,0.7-1.6,1.6C54.5,197.8,55.3,198.5,56.2,198.5"/>
+    </symbol>
+
+    <!-- Six more, so the sky is not the same four silhouettes on repeat:
+         a small fair-weather puff, a towering congestus, a flat stratus
+         sheet, a mackerel row of altocumulus, hooked cirrus, and a heavy
+         cumulus with a dark flat base. -->
+    <symbol id="art-cloud-10" viewBox="0 0 62 34">
+      <g fill="var(--cloud-body, #ffffff)">
+        <circle cx="24" cy="17" r="10"/>
+        <circle cx="39" cy="14" r="8"/>
+        <rect x="11" y="18" width="40" height="10" rx="5"/>
+      </g>
+      <rect fill="var(--cloud-shade, #dfeaf6)" x="17" y="23" width="27" height="5" rx="2.5"/>
+    </symbol>
+
+    <symbol id="art-cloud-11" viewBox="0 0 120 92">
+      <g fill="var(--cloud-body, #ffffff)">
+        <circle cx="58" cy="26" r="20"/>
+        <circle cx="37" cy="45" r="18"/>
+        <circle cx="80" cy="45" r="19"/>
+        <circle cx="58" cy="54" r="22"/>
+        <circle cx="24" cy="63" r="14"/>
+        <circle cx="94" cy="63" r="15"/>
+        <rect x="12" y="60" width="96" height="20" rx="10"/>
+      </g>
+      <g fill="var(--cloud-shade, #dfeaf6)">
+        <rect x="20" y="70" width="80" height="9" rx="4.5"/>
+        <circle cx="37" cy="52" r="11" opacity="0.5"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-cloud-12" viewBox="0 0 212 28">
+      <g fill="var(--cloud-body, #ffffff)">
+        <rect x="4" y="9" width="204" height="12" rx="6"/>
+        <rect x="34" y="3" width="118" height="9" rx="4.5"/>
+      </g>
+      <g fill="var(--cloud-shade, #dfeaf6)">
+        <rect x="26" y="15" width="152" height="5" rx="2.5"/>
+        <rect x="60" y="6" width="72" height="4" rx="2"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-cloud-13" viewBox="0 0 162 32">
+      <g fill="var(--cloud-body, #ffffff)">
+        <ellipse cx="18" cy="17" rx="12" ry="6"/>
+        <ellipse cx="47" cy="13" rx="15" ry="7"/>
+        <ellipse cx="79" cy="18" rx="11" ry="5.5"/>
+        <ellipse cx="107" cy="13" rx="14" ry="6.5"/>
+        <ellipse cx="138" cy="17" rx="10" ry="5"/>
+      </g>
+      <g fill="var(--cloud-shade, #dfeaf6)">
+        <ellipse cx="47" cy="17" rx="10" ry="2.6"/>
+        <ellipse cx="107" cy="17" rx="9" ry="2.4"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-cloud-14" viewBox="0 0 204 56">
+      <g fill="none" stroke-linecap="round" stroke="var(--cloud-body, #ffffff)">
+        <path stroke-width="5" d="M18,32 C64,20 122,17 180,13"/>
+        <path stroke-width="3.6" d="M44,44 C90,34 136,31 190,27"/>
+        <path stroke-width="3" d="M10,20 C46,13 80,12 112,10"/>
+        <path stroke-width="4" d="M18,32 C26,24 22,14 12,8"/>
+        <path stroke-width="3" d="M44,44 C52,37 49,28 40,23"/>
+      </g>
+      <g fill="none" stroke-linecap="round" stroke-width="2.4" stroke="var(--cloud-shade, #dfeaf6)">
+        <path d="M72,35 C112,27 148,25 188,21"/>
+        <path d="M40,24 C74,19 102,18 128,17"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-cloud-15" viewBox="0 0 142 70">
+      <g fill="var(--cloud-body, #ffffff)">
+        <circle cx="46" cy="33" r="19"/>
+        <circle cx="77" cy="24" r="23"/>
+        <circle cx="107" cy="35" r="16"/>
+        <rect x="20" y="36" width="106" height="22" rx="11"/>
+      </g>
+      <rect fill="var(--cloud-shade-deep, #c7d9ec)" x="24" y="47" width="98" height="11" rx="5.5"/>
+      <circle fill="var(--cloud-shade, #dfeaf6)" cx="77" cy="20" r="12" opacity="0.5"/>
+    </symbol>
+
+    <symbol id="icon-cloud" viewBox="0 0 24 24">
+      <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            d="M7 18h10a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.1 9.2 3.9 3.9 0 0 0 7 18z"/>
     </symbol>
 
     <symbol id="icon-compress" viewBox="0 0 24 24">
@@ -402,9 +488,19 @@
 
     <div class="sky__traffic" id="skyTraffic"></div>
 
+    <!-- An overcast lid, drawn as one soft layer rather than more clouds,
+         because past a certain cover you stop seeing individual clouds. -->
+    <div class="sky__deck" id="deck"></div>
+
     <!-- Ground for the whole scene: two layers of city, generated so the
          skyline differs per visit and its windows light up after dark. -->
     <svg class="skyline" id="skyline" viewBox="0 0 1600 300" preserveAspectRatio="xMidYMax slice"></svg>
+
+    <!-- Weather sits in front of the city, because that is where it is: fog is
+         the air between you and the buildings, rain the water falling through
+         it. Behind the skyline they would read as a filter over a picture. -->
+    <div class="sky__fog" id="fog"></div>
+    <div class="sky__rain" id="rain"></div>
   </div>
 
   <div class="modal-backdrop" id="modalBackdrop"></div>
@@ -606,8 +702,13 @@
             <svg viewBox="0 0 24 24"><use href="#icon-pin"/></svg>
             <span id="locationLabel">Use my location</span>
           </button>
+          <button type="button" class="ghost-btn" id="cloudToggle" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><use href="#icon-cloud"/></svg>
+            <span id="cloudToggleLabel">Always cloudy</span>
+          </button>
         </div>
         <p class="actions__note" id="locationNote"></p>
+        <p class="actions__note" id="weatherNote"></p>
       </div>
 
       <div class="panel__group">

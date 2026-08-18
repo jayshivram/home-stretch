@@ -11,6 +11,9 @@
     sunShadow: document.getElementById('sunShadow'),
     skyTraffic: document.getElementById('skyTraffic'),
     clouds: document.getElementById('clouds'),
+    deck: document.getElementById('deck'),
+    fog: document.getElementById('fog'),
+    rain: document.getElementById('rain'),
     eyebrow: document.getElementById('eyebrow'),
     timer: document.getElementById('timer'),
     timerLabel: document.getElementById('timerLabel'),
@@ -77,6 +80,17 @@
     if (h < start + fade) return clamp((h - (start - fade)) / (2 * fade), 0, 1);
     if (h > end - fade) return clamp(((end + fade) - h) / (2 * fade), 0, 1);
     return 1;
+  }
+
+  // Signed hours from a mark on the clock: negative before it, positive after,
+  // and continuous through the moment itself. The modulo version of this ran
+  // 23.99 -> 0 at sunset, which threw the moon from one horizon to the other
+  // between two frames.
+  function hoursSince(h, mark) {
+    let d = h - mark;
+    if (d < -12) d += 24;
+    if (d > 12) d -= 24;
+    return d;
   }
 
   function hourDecimal(d) { return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; }
@@ -438,6 +452,41 @@
     { at: 90,  top: '#102048', bottom: '#334a78' },
   ];
 
+  // Weather repaints the sky it is happening in. A lid overhead takes the
+  // colour out of it first and the light out of it second: an overcast sky is
+  // a flat grey sheet, brighter towards the horizon than the zenith, and it
+  // does not do sunsets. Fog goes further and removes the gradient entirely,
+  // because in fog the sky is simply the nearest air you cannot see through.
+  function weatherSky(top, bottom, w, ambient) {
+    let a = hexToRgb(top), b = hexToRgb(bottom);
+    const flatten = clamp(w.overcast * 0.72, 0, 1);
+    const mid = [0, 1, 2].map(i => (a[i] + b[i]) / 2);
+    a = [0, 1, 2].map(i => lerp(a[i], mid[i], flatten));
+    b = [0, 1, 2].map(i => lerp(b[i], mid[i], flatten));
+
+    // Grey, but not neutral: cloud light keeps a little blue in it.
+    const desaturate = (c, amount) => {
+      const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+      return [lerp(c[0], l * 0.97, amount), lerp(c[1], l, amount), lerp(c[2], l * 1.06, amount)];
+    };
+    a = desaturate(a, w.overcast * 0.85);
+    b = desaturate(b, w.overcast * 0.85);
+
+    const dim = 1 - w.overcast * 0.16 - w.rain * 0.22;
+    a = a.map(v => v * dim);
+    b = b.map(v => v * dim);
+
+    // Daytime fog is bright, night fog is whatever the city is throwing into
+    // it, so the colour it settles on has to follow the light.
+    if (w.fog > 0.01) {
+      const veil = [lerp(58, 214, ambient), lerp(56, 218, ambient), lerp(60, 224, ambient)];
+      const t = w.fog * 0.9;
+      a = [0, 1, 2].map(i => lerp(a[i], veil[i], t));
+      b = [0, 1, 2].map(i => lerp(b[i], veil[i], t * 0.94));
+    }
+    return { top: rgbToHex(a), bottom: rgbToHex(b) };
+  }
+
   function computeSky(now, workColors, eclipsed) {
     if (theme === 'amoled') return { top: '#000000', bottom: '#000000', stars: 0 };
 
@@ -450,23 +499,33 @@
     }
 
     if (theme === 'light') {
-      const { top, bottom } = interpolateBy(skyByAltitude, altitude);
+      const clear = interpolateBy(skyByAltitude, altitude);
       // Stars fade in through civil twilight and are fully out by the end of
       // astronomical twilight, which is roughly how the eye experiences it.
-      const stars = clamp((-6 - altitude) / 12, 0, 1);
       const ambient = clamp((altitude + 6) / 14, 0, 1);
-      return { top, bottom, stars, ambient, altitude, night: false };
+      // How dark it is, which is a question about the sun and nothing else.
+      // Cloud hides the stars but it does not turn the city off, so the two
+      // have to be separate numbers: overcast drives one to zero and must
+      // leave the other alone.
+      const darkness = clamp((-6 - altitude) / 12, 0, 1);
+      const stars = darkness * (1 - weather.overcast) * (1 - weather.fog * 0.85);
+      const { top, bottom } = weatherSky(clear.top, clear.bottom, weather, ambient);
+      return { top, bottom, stars, darkness, ambient, altitude, night: false };
     }
 
     // Dark: always night, but never static. Moonlight stands in for ambient,
     // so clouds and the city still lift and fall across the day.
-    const { top, bottom } = interpolateBy(nightByAltitude, altitude);
+    const clear = interpolateBy(nightByAltitude, altitude);
     const moonlit = clamp((altitude + 10) / 55, 0, 1);
+    const ambient = moonlit * 0.3;
+    const darkness = clamp(1 - moonlit * 0.35, 0.6, 1);
+    const { top, bottom } = weatherSky(clear.top, clear.bottom, weather, ambient);
     return {
       top,
       bottom,
-      stars: clamp(1 - moonlit * 0.35, 0.6, 1),
-      ambient: moonlit * 0.3,
+      stars: darkness * (1 - weather.overcast) * (1 - weather.fog * 0.85),
+      darkness,
+      ambient,
       altitude,
       night: true,
     };
@@ -571,6 +630,233 @@
     return { sunrise: s.sunrise, sunset: s.sunset, allDay: false, allNight: false };
   }
 
+  // ---- Real weather, when it can be had -----------------------------------
+  // Open-Meteo needs no key and sends CORS headers, so the forecast can be read
+  // straight from the page. Two things matter about how it is asked for.
+  //
+  // Coordinates are rounded to a tenth of a degree before they leave the
+  // browser. That is about eleven kilometres: finer than weather varies, and
+  // coarser than anywhere anyone lives. Rounding also makes the URL identical
+  // for a whole town, which is friendlier to the cache at both ends.
+  //
+  // And it asks for cloud cover split by level, because the scene already
+  // thinks in low, middle and high cloud. Sending those three straight to the
+  // three tiers is closer to the truth than one number ever was: a clear
+  // afternoon with cirrus over it is a real and common sky.
+  const FORECAST_KEY = 'homeStretch.forecast';
+  const FORECAST_TTL = 30 * 60 * 1000;
+  const FORECAST_FIELDS = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,visibility';
+
+  let forecast = null;
+  let forecastPending = false;
+
+  function forecastGrid() {
+    return { lat: Math.round(place.lat * 10) / 10, lon: Math.round(place.lon * 10) / 10 };
+  }
+
+  function loadForecast() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FORECAST_KEY));
+      if (saved && Array.isArray(saved.hours) && saved.hours.length) forecast = saved;
+    } catch (e) { /* a bad cache is the same as no cache */ }
+  }
+
+  function forecastStale() {
+    const { lat, lon } = forecastGrid();
+    if (!forecast) return true;
+    if (forecast.lat !== lat || forecast.lon !== lon) return true;
+    return Date.now() - forecast.fetchedAt > FORECAST_TTL;
+  }
+
+  function refreshForecast() {
+    if (forecastPending || !forecastStale() || !navigator.onLine) return;
+    forecastPending = true;
+    const { lat, lon } = forecastGrid();
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + '?latitude=' + lat + '&longitude=' + lon
+      + '&hourly=' + FORECAST_FIELDS
+      + '&past_days=1&forecast_days=2&timeformat=unixtime&timezone=UTC';
+
+    fetch(url, { mode: 'cors', cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data) => {
+        const h = data && data.hourly;
+        if (!h || !Array.isArray(h.time) || !h.time.length) throw new Error('no hourly data');
+        const hours = h.time.map((t, i) => ({
+          t: t * 1000,
+          all: h.cloud_cover[i],
+          low: h.cloud_cover_low[i],
+          mid: h.cloud_cover_mid[i],
+          high: h.cloud_cover_high[i],
+          precip: h.precipitation[i],
+          vis: h.visibility[i],
+        })).filter((row) => Number.isFinite(row.t) && Number.isFinite(row.all));
+        if (!hours.length) throw new Error('no usable rows');
+        forecast = { lat, lon, fetchedAt: Date.now(), hours };
+        try { localStorage.setItem(FORECAST_KEY, JSON.stringify(forecast)); } catch (e) { /* private mode */ }
+      })
+      .catch(() => { /* offline, blocked or rate limited: the generator covers it */ })
+      .then(() => { forecastPending = false; });
+  }
+
+  // Percentages arrive on the hour. Weather does not step on the hour, so the
+  // two readings either side are blended, which also keeps the whole thing
+  // continuous the way the generated version is.
+  function forecastAt(now) {
+    if (!forecast || !forecast.hours.length) return null;
+    const t = now.getTime();
+    const rows = forecast.hours;
+    if (t < rows[0].t || t > rows[rows.length - 1].t) return null;
+
+    let i = 0;
+    while (i < rows.length - 2 && rows[i + 1].t <= t) i++;
+    const a = rows[i], b = rows[i + 1] || a;
+    const span = b.t - a.t;
+    const f = span > 0 ? smoothstep(clamp((t - a.t) / span, 0, 1)) : 0;
+    const at = (key) => lerp(Number(a[key]) || 0, Number(b[key]) || 0, f);
+
+    const low = at('low') / 100, mid = at('mid') / 100, high = at('high') / 100;
+    const visibility = at('vis'), precipitation = at('precip');
+    // A lid is made of low and middle cloud. Cirrus can cover the whole sky
+    // without shutting any light out, so it is deliberately not counted here.
+    const deck = Math.max(low, mid * 0.9);
+    return {
+      cloudiness: clamp(at('all') / 100, 0, 1),
+      cover: [clamp(low, 0, 1), clamp(mid, 0, 1), clamp(high, 0, 1)],
+      overcast: smoothstep(clamp((deck - 0.55) / 0.38, 0, 1)),
+      // Millimetres in the hour: a tenth is barely spitting, two is properly wet.
+      rain: smoothstep(clamp(at('precip') / 2.2, 0, 1)),
+      // Metres of visibility. Below a kilometre is fog by anyone's definition.
+      fog: smoothstep(clamp((5000 - visibility) / 4200, 0, 1)),
+      source: 'forecast',
+      // Kept unscaled so the panel can report what was actually read rather
+      // than the model's interpretation of it.
+      reading: { low: at('low'), mid: at('mid'), high: at('high'), all: at('all'),
+                 precipitation, visibility },
+    };
+  }
+
+  // ---- Weather -----------------------------------------------------------
+  // The scene knew what hour it was but not what the day was like, so every
+  // sky came out clear. Weather is generated rather than fetched: no network,
+  // no key, works offline, and it is deterministic, so two tabs open in the
+  // same place agree about the sky and a reload does not reroll it.
+  //
+  // The generator is value noise on the clock. Each control point is a stable
+  // hash of the hour it belongs to, and the curve smoothsteps between them, so
+  // the result drifts the way weather drifts rather than jittering per frame.
+  // Indexing on absolute hours rather than hour-of-day matters: midnight is
+  // not a boundary in the atmosphere, and a front should be free to cross one.
+  function hashUnit(seed, n) {
+    let x = (seed ^ Math.imul(n | 0, 0x9e3779b9)) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 0x85ebca6b) >>> 0;
+    x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35) >>> 0;
+    return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+  }
+
+  function weatherNoise(seed, hours, period) {
+    const x = hours / period;
+    const i = Math.floor(x);
+    return lerp(hashUnit(seed, i), hashUnit(seed, i + 1), smoothstep(x - i));
+  }
+
+  // Somewhere near a degree of resolution, so neighbouring towns share weather
+  // and distant ones do not.
+  function placeSeed(salt) {
+    const la = Math.round(place.lat), lo = Math.round(place.lon);
+    return (Math.imul(la + 90, 73856093) ^ Math.imul(lo + 180, 19349663) ^ Math.imul(salt, 83492791)) >>> 0;
+  }
+
+  // Cloud cover is not evenly distributed. Most days are decidedly clear or
+  // decidedly grey, and the half-and-half sky is the rarer one, so the raw
+  // noise gets pushed away from the middle before it is used.
+  function polarise(v, strength) {
+    return smoothstep(clamp((v - 0.5) * strength + 0.5, 0, 1));
+  }
+
+  function generatedWeather(now) {
+    const hours = now.getTime() / 3600000;
+
+    // A front takes most of a day to come through, with shorter swells riding
+    // on top of it. Two periods, so the sky has both a mood and a texture.
+    const raw = 0.62 * weatherNoise(placeSeed(1), hours, 15)
+              + 0.38 * weatherNoise(placeSeed(2), hours, 4.5);
+
+    // Winter is cloudier than summer, and which half of the year that falls in
+    // depends on which hemisphere you are standing in.
+    const dayOfYear = (now - new Date(now.getFullYear(), 0, 0)) / 86400000;
+    const northern = place.lat >= 0;
+    const winter = 0.5 + 0.5 * Math.cos((dayOfYear / 365.25) * 2 * Math.PI + (northern ? 0 : Math.PI));
+    const seasonal = (winter - 0.5) * 0.30 * clamp(Math.abs(place.lat) / 45, 0, 1);
+
+    const cloudiness = clamp(polarise(raw, 1.7) + seasonal, 0, 1);
+
+    // Past about six tenths of cover the gaps close and it stops being a sky
+    // with clouds in it and becomes a lid.
+    const overcast = smoothstep(clamp((cloudiness - 0.58) / 0.34, 0, 1));
+
+    // Rain needs the lid first, and then its own timing: showers come and go
+    // over a few hours inside a wet day.
+    const shower = weatherNoise(placeSeed(3), hours, 4.5);
+    const rain = overcast * smoothstep(clamp((shower - 0.58) / 0.34, 0, 1));
+
+    // Radiation fog is a clear-night phenomenon: the ground radiates its heat
+    // away under an open sky, the air against it cools to its dew point, and
+    // the fog that forms burns off through the couple of hours after sunrise.
+    // A lid overhead keeps the heat in and prevents the whole business, so fog
+    // and overcast are close to mutually exclusive.
+    const { sunrise } = daylightWindow(now);
+    const h = hourDecimal(now);
+    const sinceDawn = hoursSince(h, sunrise);
+    const fogWindow = sinceDawn < 0
+      ? clamp((sinceDawn + 7) / 5, 0, 1)          // building through the small hours
+      : clamp(1 - sinceDawn / 2.6, 0, 1);         // burning off after sunrise
+    const fogGate = smoothstep(clamp((weatherNoise(placeSeed(4), hours, 26) - 0.62) / 0.22, 0, 1));
+    const fog = fogGate * fogWindow * (1 - overcast) * 0.92;
+
+    // Split the cover over the three levels. They move together, because one
+    // weather system makes all of it, but not in lockstep: a sky can be clear
+    // underneath and streaked with cirrus on top, and often is.
+    const spread = (salt) => 0.5 + 1.0 * weatherNoise(placeSeed(salt), hours, 9);
+    const cover = [
+      clamp(cloudiness * spread(5), 0, 1),
+      clamp(cloudiness * spread(6), 0, 1),
+      clamp(cloudiness * spread(7), 0, 1),
+    ];
+
+    return { cloudiness, cover, overcast, rain, fog, source: 'generated' };
+  }
+
+  // Real weather if the forecast reached us, invented weather if it did not.
+  // The two produce the same shape, so nothing downstream knows the difference
+  // and the scene still works on a plane with the wifi off.
+  function weatherAt(now) {
+    return forecastAt(now) || generatedWeather(now);
+  }
+
+  // Clear weather is honest and can also be dull: a real forecast of nothing
+  // leaves an empty sky for days at a stretch. This puts that back under the
+  // reader's control without lying about the reading, which is still what the
+  // panel reports and still what decides rain, fog and the light.
+  const CLOUDS_KEY = 'homeStretch.clouds';
+  const ALWAYS_CLOUDY = [0.52, 0.46, 0.58];
+
+  let alwaysCloudy = false;
+  try { alwaysCloudy = localStorage.getItem(CLOUDS_KEY) === 'always'; } catch (e) { /* default off */ }
+
+  // What the sky is doing right now. Recomputed each tick; it is only a
+  // handful of hashes, and keeping it live means a front can arrive while the
+  // page is open rather than only between sessions.
+  let weather = { cloudiness: 0, cover: [0, 0, 0], overcast: 0, rain: 0, fog: 0, source: 'generated' };
+
+  function describeWeather(w) {
+    if (w.fog > 0.4) return 'fog';
+    if (w.rain > 0.35) return 'rain';
+    if (w.overcast > 0.6) return 'overcast';
+    if (w.cloudiness > 0.35) return 'cloudy';
+    return 'clear';
+  }
+
   // ---- Moon phase --------------------------------------------------------
   // The supplied sheet is a 7x4 grid of 28 drawings running thin-crescent
   // lit-on-the-left, through full, to thin-crescent lit-on-the-right. The
@@ -638,12 +924,24 @@
   // fraction put the sun almost on the horizon while the sky, which is keyed
   // to altitude, was still painting midday blue. Sharing one source means the
   // sun touches the horizon exactly as the sky turns orange.
+  // The arc runs a little past both ends so a body can go on sinking after it
+  // reaches the horizon instead of parking on the line and fading out where it
+  // stands. Something that sets has to keep moving while it goes.
+  const BELOW_HORIZON = 0.16;
+
+  // What is left of the sun or moon once there is weather in the way. It goes
+  // soft before it goes: through thin cover you still get a bright smudge, and
+  // only a closed deck takes the disc away completely.
+  function skyVeil() {
+    return clamp(1 - weather.overcast * 0.97 - weather.fog * 0.8, 0, 1);
+  }
+
   function positionCelestial(el, t, rise, opacity) {
     const { horizon, amplitude, spread } = arcGeometry();
-    const angle = (1 - clamp(t, 0, 1)) * Math.PI;
+    const angle = (1 - clamp(t, -BELOW_HORIZON, 1 + BELOW_HORIZON)) * Math.PI;
     el.style.left = (50 + Math.cos(angle) * spread) + '%';
-    el.style.top = (horizon - clamp(rise, 0, 1) * amplitude) + '%';
-    el.style.opacity = String(opacity);
+    el.style.top = (horizon - clamp(rise, -BELOW_HORIZON, 1) * amplitude) + '%';
+    el.style.opacity = String(opacity * skyVeil());
   }
 
   // How high the sun stands as a fraction of the highest it reaches today.
@@ -658,36 +956,250 @@
     const h = hourDecimal(now);
     const { sunrise, sunset } = daylightWindow(now);
     const dayLength = Math.max(0.5, sunset - sunrise);
-    const sunT = clamp((h - sunrise) / dayLength, 0, 1);
+    const nightLength = Math.max(0.5, 24 - dayLength);
+    // Unclamped, so the sun keeps travelling west through its own setting
+    // rather than stopping dead the instant it touches the horizon.
+    const sunT = (h - sunrise) / dayLength;
+    // Signed, so the moon spends the last minutes before sunset climbing
+    // towards the eastern horizon instead of waiting, hidden, in the west.
+    const sinceSet = hoursSince(h, sunset);
+    const moonT = sinceSet / nightLength;
+    const moonRise = Math.sin(clamp(moonT, -BELOW_HORIZON, 1 + BELOW_HORIZON) * Math.PI);
 
     if (night) {
       // The night twin: the moon rides exactly where the sun is, so dark mode
       // tracks the same day rather than inventing a second clock. Off the
       // daylight arc it falls back to its own path across the night.
       const daytime = h >= sunrise && h <= sunset;
-      const nightLength = Math.max(0.5, 24 - dayLength);
-      const sinceSet = ((h - sunset) + 24) % 24;
-      const rise = daytime ? altitudeRise(now) : Math.sin(clamp(sinceSet / nightLength, 0, 1) * Math.PI);
-      positionCelestial(els.moon, daytime ? sunT : clamp(sinceSet / nightLength, 0, 1), rise, 1);
+      const rise = daytime ? altitudeRise(now) : moonRise;
+      // Changing arcs means crossing the sky, and there is no honest way to
+      // travel that far in one frame. Both changeovers happen at a horizon,
+      // so the moon is set down at one edge and picked up at the other while
+      // it is out of sight, and the swap reads as a set followed by a rise.
+      const swapAt = Math.min(Math.abs(hoursSince(h, sunset)), Math.abs(hoursSince(h, sunrise)));
+      const swap = clamp((swapAt - 0.18) / 0.45, 0, 1);
+      positionCelestial(els.moon, daytime ? sunT : moonT, rise, swap);
       els.sun.style.opacity = '0';
       return;
     }
 
     positionCelestial(els.sun, sunT, altitudeRise(now), windowOpacity(h, sunrise, sunset, 0.6));
-    const sunColors = interpolate(sunStops, sunT);
+    const sunColors = interpolate(sunStops, clamp(sunT, 0, 1));
     els.sun.style.setProperty('--sun-core', sunColors.core);
     els.sun.style.setProperty('--sun-ray', sunColors.ray);
 
-    // The moon takes the other half of the clock, riding the same arc.
-    const nightLength = Math.max(0.5, 24 - dayLength);
-    const sinceSet = ((h - sunset) + 24) % 24;
-    const moonT = clamp(sinceSet / nightLength, 0, 1);
-    positionCelestial(els.moon, moonT, Math.sin(moonT * Math.PI), windowOpacity(sinceSet, 0, nightLength, 0.6));
+    // The moon takes the other half of the clock, riding the same arc. Its
+    // fade-in now overlaps the sun's fade-out, which is what dusk actually
+    // looks like: for a while both are up, one going down in the west and one
+    // coming up in the east.
+    positionCelestial(els.moon, moonT, moonRise, windowOpacity(sinceSet, 0, nightLength, 0.6));
   }
 
-  function updateClouds(ambient) {
-    els.root.style.setProperty('--cloud-opacity', (0.35 + 0.55 * ambient).toFixed(2));
-    els.root.style.setProperty('--cloud-brightness', (0.5 + 0.55 * ambient).toFixed(2));
+  // ---- What colour a cloud actually is ---------------------------------
+  // A cloud has no colour of its own. It is a white diffuser, and what it
+  // shows is whatever light reaches it, so the honest way to colour one is to
+  // follow the light rather than pick from a ramp of sunset oranges.
+  //
+  // Sunlight crosses more air the lower the sun sits, and air scatters blue
+  // out of the beam far faster than red. The Rayleigh cross-section goes as
+  // roughly lambda^-4, which at the sRGB primaries (610, 550 and 470 nm)
+  // gives these optical depths for one atmosphere at sea level.
+  const RAYLEIGH = { r: 0.0656, g: 0.1001, b: 0.1902 };
+
+  // Kasten-Young (1989). The naive 1/sin(h) runs away to infinity at the
+  // horizon, which is exactly where all the interesting colour happens; this
+  // settles near 38 air masses instead, which is what is really down there.
+  function airMass(altitudeDeg) {
+    const h = Math.max(altitudeDeg, -0.9);
+    return 1 / (Math.sin(h * RAD) + 0.50572 * Math.pow(h + 6.07995, -1.6364));
+  }
+
+  function rayleighBeam(m) {
+    const r = Math.exp(-RAYLEIGH.r * m);
+    const g = Math.exp(-RAYLEIGH.g * m);
+    const b = Math.exp(-RAYLEIGH.b * m);
+    const peak = Math.max(r, g, b);
+    return { rgb: [r / peak, g / peak, b / peak], transmittance: peak };
+  }
+
+  // A cloud is not lit by the disc of the sun alone. Most of what falls on it
+  // near sunset comes from the blazing aureole of sky around the sun, which
+  // took a shorter path through the air and so stayed much less red. Leave
+  // that second term out and the maths is still right while the picture is
+  // wrong: pure beam colour at 38 air masses is nearly blood red, and real
+  // sunset clouds are orange.
+  function illuminant(altitudeDeg) {
+    const m = airMass(altitudeDeg);
+    const direct = rayleighBeam(m);
+    const aureole = rayleighBeam(m * 0.22);
+    return {
+      rgb: [0, 1, 2].map(i => lerp(direct.rgb[i], aureole.rgb[i], 0.55)),
+      transmittance: direct.transmittance,
+    };
+  }
+
+  // The eye adapts to daylight, so an overhead sun has to come out white
+  // rather than the faintly yellow thing it measures as. Dividing through by
+  // the overhead illuminant white-balances the model and leaves only the
+  // reddening that is actually worth seeing.
+  const WHITE_POINT = illuminant(90).rgb;
+
+  function balancedSunlight(altitudeDeg) {
+    const light = illuminant(altitudeDeg);
+    const v = [0, 1, 2].map(i => light.rgb[i] / WHITE_POINT[i]);
+    const peak = Math.max(v[0], v[1], v[2]);
+    return { rgb: v.map(x => x / peak), transmittance: light.transmittance };
+  }
+
+  // How far the sun must drop below your horizon before it drops below a
+  // cloud horizon: geometric dip for the height, plus the half degree that
+  // refraction buys back and the semi-diameter of the sun itself. Nine
+  // kilometres of cirrus keeps its sunlight for nearly four degrees after the
+  // ground has lost it, which is the whole reason high cloud is still burning
+  // pink when the street below has gone blue.
+  const EARTH_RADIUS_KM = 6371;
+  function horizonDip(km) {
+    return Math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + km)) / RAD + 0.84;
+  }
+
+  // Three levels, at the heights those cloud families really occupy. Every
+  // shape carries its own height in km; cloudTier maps that onto the band
+  // whose lighting it shares, and the tier decides both how long a cloud
+  // stays lit after sunset and how much air its light crossed to reach it.
+  const CLOUD_TIERS = [1.5, 3.5, 9];
+  function cloudTier(km) { return km >= 6 ? 2 : km >= 3 ? 1 : 0; }
+
+  // Sodium and warm LED, thrown up off a city and caught on the cloud base.
+  const CITY_SKYGLOW = [152, 96, 44];
+
+  function smoothstep(t) { return t * t * (3 - 2 * t); }
+
+  function tierLighting(km, altitude, skyTop, skyBottom, night, w) {
+    const seen = altitude + horizonDip(km);
+    const sun = balancedSunlight(seen);
+    // Under a lid there is no beam left to speak of. Everything below the deck
+    // is lit by whatever finds its way through, which arrives from the whole
+    // sky at once, so shape goes flat and a cloud stops having a sunlit side
+    // at all. This is why an overcast sunset is grey and disappointing: the
+    // colour is still up there, just not on anything you can see.
+    const blocked = w ? w.overcast : 0;
+
+    // The shaded side of a cloud is lit by the sky, but comes out far brighter
+    // than the sky behind it, because light entering the sunlit face is
+    // carried through the body droplet by droplet. Without that carry-through
+    // clouds sink into the sky and disappear.
+    const skylight = [0, 1, 2].map(i => lerp(255, lerp(skyBottom[i], skyTop[i], 0.25), 0.55));
+    const ambient = Math.pow(clamp((altitude + 6) / 16, 0, 1), 0.6);
+    const shadowLum = night ? 0.30 + 0.24 * ambient : 0.94 * (0.34 + 0.66 * ambient);
+    const shadowFace = skylight.map(v => v * shadowLum);
+
+    // The direct beam, dimmed by everything the air took out of it.
+    const litLum = (0.62 + 0.38 * Math.pow(sun.transmittance, 0.30)) * (night ? 0.42 : 1);
+    const beamFace = [0, 1, 2].map(i => 255 * sun.rgb[i] * litLum);
+    // Even a sunlit face collects some sky fill.
+    const sunlitFace = [0, 1, 2].map(i => lerp(beamFace[i], skylight[i] * 0.9, 0.18));
+    // Below its own horizon a cloud sits in the shadow of the Earth and keeps
+    // only what the sky still gives it.
+    const lit = clamp(seen / 2.5, 0, 1) * (1 - blocked * 0.97);
+    const litFace = [0, 1, 2].map(i => lerp(shadowFace[i] * 0.75, sunlitFace[i], lit));
+
+    // The inversion that gives the whole thing away as real: with the sun high
+    // the light lands on the tops and the bases are shadow, and as it drops
+    // the beam swings round to the side and then to underneath, until it is
+    // the bases that are burning and the tops that have gone dull.
+    const under = smoothstep(clamp((14 - seen) / 14, 0, 1));
+    let body = [0, 1, 2].map(i => lerp(litFace[i], shadowFace[i], 0.60 * under));
+    let shade = [0, 1, 2].map(i => lerp(shadowFace[i], litFace[i], 0.95 * under));
+    let deep = [0, 1, 2].map(i => lerp(shade[i] * 0.90, litFace[i] * 0.96, 0.30 * under));
+
+    // Once the sun is properly gone a cloud base over a city is not black. It
+    // is dull sodium orange: the light of the town, thrown up and bounced back
+    // down off the underside.
+    const glow = clamp((-2 - altitude) / 9, 0, 1) * 0.42;
+    if (glow > 0) {
+      shade = [0, 1, 2].map(i => lerp(shade[i], CITY_SKYGLOW[i], glow * 0.6));
+      deep = [0, 1, 2].map(i => lerp(deep[i], CITY_SKYGLOW[i], glow));
+    }
+
+    // Moonlight is sunlight, so a low moon really does light a cloud amber.
+    // What changes is the eye: at these levels colour vision has largely shut
+    // down and the rods have taken over, which drains the hue and leaves the
+    // cool grey-blue everyone recognises as night.
+    if (night) {
+      const scotopic = (c) => {
+        const grey = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        return [
+          lerp(c[0], grey * 0.94, 0.62),
+          lerp(c[1], grey, 0.62),
+          lerp(c[2], grey * 1.16, 0.62),
+        ];
+      };
+      body = scotopic(body); shade = scotopic(shade); deep = scotopic(deep);
+    }
+
+    // Diffuse light off a grey lid is dimmer and less coloured than sunlight,
+    // and rain takes another bite out of it.
+    if (blocked > 0.01 || (w && w.rain > 0.01)) {
+      const dim = 1 - blocked * 0.20 - (w ? w.rain : 0) * 0.26;
+      const flat = (c) => {
+        const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        return [lerp(c[0], l * 0.98, blocked * 0.8) * dim,
+                lerp(c[1], l, blocked * 0.8) * dim,
+                lerp(c[2], l * 1.05, blocked * 0.8) * dim];
+      };
+      body = flat(body); shade = flat(shade); deep = flat(deep);
+    }
+
+    return { body: rgbToHex(body), shade: rgbToHex(shade), deep: rgbToHex(deep) };
+  }
+
+  // Everything weather touches, in one place. The numbers go out as custom
+  // properties so the reveal and the colour both happen in CSS, on the
+  // compositor, rather than by writing to a few hundred elements each second.
+  function updateWeather(sky) {
+    const w = weather;
+    const cover = w.cover || [w.cloudiness, w.cloudiness, w.cloudiness];
+    for (let i = 0; i < 3; i++) {
+      // The floor only ever adds cloud to a bare sky; a genuinely grey day is
+      // already past it and is left alone.
+      const c = alwaysCloudy ? Math.max(cover[i], ALWAYS_CLOUDY[i]) : cover[i];
+      els.clouds.style.setProperty('--cover-' + i, c.toFixed(3));
+    }
+    // Individual clouds are inside the deck once it closes, so they go as it
+    // arrives rather than piling up behind it.
+    els.clouds.style.setProperty('--under-deck', (1 - w.overcast * 0.88).toFixed(3));
+    els.deck.style.setProperty('--overcast', w.overcast.toFixed(3));
+
+    // The sun does not switch off behind cloud, it goes soft first and then
+    // out. How much of the disc survives is skyVeil(), applied where it is
+    // positioned; the blur that comes first is the CSS half of the same idea.
+    els.root.style.setProperty('--sky-blur', (w.cloudiness * 2.6 + w.fog * 5).toFixed(2) + 'px');
+
+    els.rain.style.setProperty('--rain', w.rain.toFixed(3));
+    els.rain.classList.toggle('is-falling', w.rain > 0.02);
+
+    els.fog.style.setProperty('--fog', w.fog.toFixed(3));
+    const ambient = sky.ambient ?? 1;
+    const veil = [Math.round(lerp(58, 214, ambient)), Math.round(lerp(56, 218, ambient)), Math.round(lerp(60, 224, ambient))];
+    els.fog.style.setProperty('--fog-color', `rgb(${veil[0]}, ${veil[1]}, ${veil[2]})`);
+
+    els.root.dataset.weather = describeWeather(w);
+    renderWeatherNote();
+  }
+
+  function updateClouds(sky) {
+    const ambient = sky.ambient ?? 1;
+    const skyTop = hexToRgb(sky.top);
+    const skyBottom = hexToRgb(sky.bottom);
+    CLOUD_TIERS.forEach((km, tier) => {
+      const light = tierLighting(km, sky.altitude ?? 45, skyTop, skyBottom, !!sky.night, weather);
+      els.root.style.setProperty('--cloud-body-' + tier, light.body);
+      els.root.style.setProperty('--cloud-shade-' + tier, light.shade);
+      els.root.style.setProperty('--cloud-deep-' + tier, light.deep);
+    });
+    // Colour now carries the light level, so opacity is only here to stop the
+    // shapes reading as hard cut-outs once the sky goes dark.
+    els.root.style.setProperty('--cloud-opacity', (0.55 + 0.35 * ambient).toFixed(2));
     els.root.style.setProperty('--bird-ink', (0.25 + 0.45 * ambient).toFixed(2));
   }
 
@@ -708,16 +1220,103 @@
     { at: 1, r: 62, g: 82, b: 116, a: 0.72 }, // daylight haze, not a night silhouette
   ];
 
-  let lastGlow = -1;
+  // ---- How much of the city is up ---------------------------------------
+  // One number for the whole skyline, which each window then compares against
+  // its own hour. That is what turns a block of light into a city: the value
+  // slides, windows cross their thresholds a couple at a time, and the place
+  // goes to bed unevenly the way a real one does.
+  //
+  // Note which end is tied to what. Lights come on with the dark, so the
+  // evening follows sunset and the lit hours stretch and shrink with the
+  // season. Bedtime does not: it is half past nine whatever the sun is doing,
+  // so the far end of the curve is nailed to the clock.
+  const CITY_SMALL_HOURS = 0.42;      // what is still burning at three in the morning
+  const CITY_EARLY_RISERS = 0.58;
 
-  function updateSkyline(ambient, darkness) {
-    const mix = (stops) => {
+  function cityAwake(now) {
+    const h = hourDecimal(now);
+    const { sunset } = daylightWindow(now);
+    // The whole day is measured from the moment the lights start going on,
+    // which is a sunset thing. Running it on one axis that begins and ends
+    // there is what keeps the curve continuous: there is no midnight in it to
+    // fall off, and no hour where the city can jump brightness in one frame.
+    const anchor = sunset - 0.7;
+    const from = (hour) => (((hour - anchor) % 24) + 24) % 24;
+
+    // Bedtime and the alarm clock are clock things: they do not move with the
+    // season, which is exactly why winter evenings are lit for so much longer.
+    // Far enough north in midsummer the sun sets after bedtime, and half nine
+    // measured forward from dusk lands most of a day away. Where that happens
+    // the evening is simply over before it started, and the city goes straight
+    // from switching on to settling down.
+    let bed = from(21.5);
+    if (bed > 12) bed = 0;
+
+    const stops = [
+      { at: 0, v: 0 },                              // dusk, lights beginning
+      { at: 1.4, v: 1 },                            // everyone home and lit
+      { at: bed, v: 1 },                            // half nine
+      { at: bed + 4.1, v: CITY_SMALL_HOURS },       // gone to bed by half one
+      { at: from(5.25), v: CITY_SMALL_HOURS },      // the quiet stretch
+      { at: from(7.2), v: CITY_EARLY_RISERS },      // up before it is light
+      { at: from(11), v: 0 },                       // out, and daylight anyway
+      { at: 24, v: 0 },                             // back round to dusk
+    ];
+    // A sunset late enough to fall the wrong side of bedtime would put these
+    // out of order, so they are pushed apart rather than allowed to cross.
+    for (let i = 1; i < stops.length; i++) {
+      stops[i].at = Math.max(stops[i].at, stops[i - 1].at + 0.05);
+    }
+    return interpolateBy(stops, from(h)).v;
+  }
+
+  // Dark mode is night at every hour, so a wall clock is the wrong thing to
+  // ask: at one in the afternoon it would answer that nobody has their lights
+  // on, and leave a night city looking abandoned. What it runs on instead is
+  // how far through the depicted night the scene has got, which is the same
+  // parameter the moon is riding.
+  function depictedNight(now) {
+    const h = hourDecimal(now);
+    const { sunrise, sunset } = daylightWindow(now);
+    const dayLength = Math.max(0.5, sunset - sunrise);
+    const nightLength = Math.max(0.5, 24 - dayLength);
+    return (h >= sunrise && h <= sunset)
+      ? clamp((h - sunrise) / dayLength, 0, 1)
+      : clamp(hoursSince(h, sunset) / nightLength, 0, 1);
+  }
+
+  // Both ends of this are dusk and dawn, and both are busy, which is what lets
+  // the moon change arcs at sunset without the city jumping with it.
+  function cityAwakeAtNight(fraction) {
+    return interpolateBy([
+      { at: 0, v: 1 },                       // dusk
+      { at: 0.28, v: CITY_SMALL_HOURS },     // settled
+      { at: 0.72, v: CITY_SMALL_HOURS },     // the quiet stretch
+      { at: 1, v: 1 },                       // up again by dawn
+    ], clamp(fraction, 0, 1)).v;
+  }
+
+  let lastGlow = -1;
+  let lastAwake = -1;
+
+  function updateSkyline(sky) {
+    const ambient = sky.ambient ?? 1;
+    const darkness = sky.darkness ?? 0;
+    // Aerial perspective, which fog only exaggerates: the far band goes first
+    // and the near band last, because there is more air in the way of the one
+    // than the other. Losing the back of the city before the front is what
+    // makes fog read as depth rather than as a wash over the whole picture.
+    const haze = weather.fog;
+    const veil = [lerp(58, 214, ambient), lerp(56, 218, ambient), lerp(60, 224, ambient)];
+    const mix = (stops, distance) => {
       const c = interpolateBy(stops, ambient);
-      return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${c.a.toFixed(2)})`;
+      const t = clamp(haze * distance, 0, 0.97);
+      return `rgba(${Math.round(lerp(c.r, veil[0], t))}, ${Math.round(lerp(c.g, veil[1], t))}, ` +
+             `${Math.round(lerp(c.b, veil[2], t))}, ${lerp(c.a, c.a * 0.45 + 0.25, t).toFixed(2)})`;
     };
-    els.root.style.setProperty('--city-far', mix(cityFar));
-    els.root.style.setProperty('--city-mid', mix(cityMid));
-    els.root.style.setProperty('--city-near', mix(cityNear));
+    els.root.style.setProperty('--city-far', mix(cityFar, 1.15));
+    els.root.style.setProperty('--city-mid', mix(cityMid, 0.8));
+    els.root.style.setProperty('--city-near', mix(cityNear, 0.45));
 
     // Offices light up before it is fully dark, and never quite all at once.
     // Thousands of windows inherit this, so it is only written when it has
@@ -727,6 +1326,54 @@
       lastGlow = glow;
       els.root.style.setProperty('--window-glow', String(glow));
     }
+
+    // Three decimals, because this is what the windows are compared against
+    // and rounding it harder would switch them off in visible batches.
+    //
+    // Light mode has a real clock to keep. Dark mode does not, because it is
+    // night in it whatever the hour, so it keeps the depicted night instead.
+    const now = new Date();
+    const awake = Number((sky.night ? cityAwakeAtNight(depictedNight(now)) : cityAwake(now)).toFixed(3));
+    if (awake !== lastAwake) {
+      lastAwake = awake;
+      els.root.style.setProperty('--city-awake', String(awake));
+    }
+  }
+
+  // ---- Somebody is still up ----------------------------------------------
+  // The curve above only ever moves one way at a time, so on its own the city
+  // would empty out tidily and then hold perfectly still until morning. Real
+  // ones do not: a light goes on at three because someone could not sleep, and
+  // goes off again twenty minutes later. Overriding one window's --wake is
+  // enough to do it, and costs a single style write.
+  let stirTimer = null;
+
+  function stirCity() {
+    stirTimer = null;
+    const awake = lastAwake;
+    // Only in the small hours, and only when there is a city to look at.
+    if (!document.hidden && lastGlow > 0.5 && awake >= 0 && awake < 0.62) {
+      const windows = document.querySelectorAll('.skyline__windows rect');
+      if (windows.length) {
+        const win = windows[Math.floor(Math.random() * windows.length)];
+        const wake = win.style.getPropertyValue('--wake');
+        const owl = win.style.getPropertyValue('--owl');
+        const lit = owl === '1' || parseFloat(wake) < awake;
+        // Turn on what is off, and off what is on.
+        win.style.setProperty('--wake', lit ? '2' : '0');
+        if (lit) win.style.setProperty('--owl', '0');
+        setTimeout(() => {
+          win.style.setProperty('--wake', wake || '0.5');
+          if (owl) win.style.setProperty('--owl', owl); else win.style.removeProperty('--owl');
+        }, rand(90, 900) * 1000);
+      }
+    }
+    scheduleStir();
+  }
+
+  function scheduleStir() {
+    if (stirTimer) clearTimeout(stirTimer);
+    stirTimer = setTimeout(stirCity, rand(24, 95) * 1000);
   }
 
   // ---- Birds and planes: spawned at random intervals, light theme only
@@ -776,57 +1423,185 @@
 
   // Clouds live on three depth bands. Nearer clouds are bigger, faster and
   // more opaque, which is what sells the sky as having depth at all.
-  // Nine shapes across three families: the supplied flat bars, billowed
-  // cumulus, and thin cirrus. Cirrus is tagged so it can be kept high and
-  // faint, where that kind of cloud actually lives.
+  //
+  // Fifteen shapes across four families. The family, not the individual
+  // shape, is what each band draws from: cirrus belongs high and thin, a
+  // towering congestus only makes sense close up, and a stratus sheet has to
+  // be wide enough to read as a sheet. Weighting by family keeps the mix
+  // plausible however the random draw falls.
   const CLOUD_SHAPES = [
-    { id: '#art-cloud-1', viewBox: '0 0 77 22' },
-    { id: '#art-cloud-2', viewBox: '0 0 90 32' },
-    { id: '#art-cloud-3', viewBox: '0 0 74 35' },
-    { id: '#art-cloud-4', viewBox: '0 0 78 29' },
-    { id: '#art-cloud-5', viewBox: '0 0 128 64' },
-    { id: '#art-cloud-6', viewBox: '0 0 168 74' },
-    { id: '#art-cloud-7', viewBox: '0 0 180 44', high: true },
-    { id: '#art-cloud-8', viewBox: '0 0 84 42' },
-    { id: '#art-cloud-9', viewBox: '0 0 150 52' },
+    { id: '#art-cloud-1', viewBox: '45 108 77 22', family: 'bar', km: 3.2 },
+    { id: '#art-cloud-2', viewBox: '231 106 90 32', family: 'bar', km: 3.2 },
+    { id: '#art-cloud-3', viewBox: '237 183 74 35', family: 'bar', km: 3.2 },
+    { id: '#art-cloud-4', viewBox: '20 172 78 29', family: 'bar', km: 3.2 },
+    { id: '#art-cloud-9', viewBox: '0 0 150 52', family: 'bar', km: 3.2 },
+    { id: '#art-cloud-5', viewBox: '0 0 128 64', family: 'cumulus', km: 1.6 },
+    { id: '#art-cloud-6', viewBox: '0 0 168 74', family: 'cumulus', km: 1.7 },
+    { id: '#art-cloud-8', viewBox: '0 0 84 42', family: 'cumulus', km: 1.4 },
+    { id: '#art-cloud-10', viewBox: '0 0 62 34', family: 'cumulus', km: 1.2 },
+    { id: '#art-cloud-15', viewBox: '0 0 142 70', family: 'cumulus', km: 1.8 },
+    { id: '#art-cloud-11', viewBox: '0 0 120 92', family: 'cumulus', near: true, km: 2.2 },
+    { id: '#art-cloud-7', viewBox: '0 0 180 44', family: 'cirrus', km: 9.0 },
+    { id: '#art-cloud-13', viewBox: '0 0 162 32', family: 'cirrus', km: 4.5 },
+    { id: '#art-cloud-14', viewBox: '0 0 204 56', family: 'cirrus', km: 9.5 },
+    { id: '#art-cloud-12', viewBox: '0 0 212 28', family: 'stratus', km: 0.7 },
+  ];
+
+  // Weighted family mix per band, highest band first. High air is mostly ice
+  // cloud; the bands nearer the ground carry the heaped water cloud.
+  const CLOUD_MIX = [
+    { cirrus: 46, bar: 30, cumulus: 24, stratus: 0 },
+    { cirrus: 16, bar: 34, cumulus: 40, stratus: 10 },
+    { cirrus: 0, bar: 24, cumulus: 56, stratus: 20 },
+  ];
+
+  function pickCloudShape(mix, allowNear, avoid) {
+    // Draw a family first, then a shape from it, retrying once if the draw
+    // repeats the previous cloud — back-to-back twins are the one thing that
+    // gives a generated sky away.
+    for (let attempt = 0; attempt < 6; attempt++) {
+      let total = 0;
+      for (const family of Object.keys(mix)) total += mix[family];
+      let roll = Math.random() * total;
+      let chosen = 'cumulus';
+      for (const family of Object.keys(mix)) {
+        roll -= mix[family];
+        if (roll <= 0) { chosen = family; break; }
+      }
+      const pool = CLOUD_SHAPES.filter(
+        (shape) => shape.family === chosen && (allowNear || !shape.near)
+      );
+      if (!pool.length) continue;
+      const shape = pick(pool);
+      if (shape !== avoid || attempt === 5) return shape;
+    }
+    return CLOUD_SHAPES[0];
+  }
+
+  // Three distances, and everything that flies or drifts picks one. A bird on
+  // the far band is the same distance off as a cloud on the far band: it is
+  // the same fraction of the size, carries the same haze, takes the same
+  // unhurried time to cross, and sits at the same place in the stack, which is
+  // what lets it go behind the cloud in front of it. One table, so the layers
+  // cannot drift out of agreement with each other.
+  const SKY_BANDS = [
+    { depth: 0.45, cloud: { count: 7, width: [70, 120], speed: [200, 280], top: [2, 34] },
+      bird: { scale: [0.30, 0.50], top: [3, 24], cross: [70, 115] } },
+    { depth: 0.72, cloud: { count: 7, width: [130, 210], speed: [130, 190], top: [6, 48] },
+      bird: { scale: [0.52, 0.84], top: [5, 38], cross: [40, 66] } },
+    { depth: 1.00, cloud: { count: 5, width: [230, 330], speed: [85, 125], top: [12, 62] },
+      bird: { scale: [0.95, 1.35], top: [8, 50], cross: [21, 34] } },
   ];
 
   function buildClouds() {
-    const bands = [
-      { count: 6, width: [70, 120], speed: [200, 280], top: [2, 34], depth: 0.45 },
-      { count: 6, width: [130, 210], speed: [130, 190], top: [6, 48], depth: 0.72 },
-      { count: 4, width: [230, 330], speed: [85, 125], top: [12, 62], depth: 1 },
-    ];
+    const bands = SKY_BANDS.map(b => ({ ...b.cloud, depth: b.depth }));
 
     const frag = document.createDocumentFragment();
-    for (const band of bands) {
+    bands.forEach((band, bandIndex) => {
+      let previous = null;
       for (let i = 0; i < band.count; i++) {
-        const shape = pick(CLOUD_SHAPES);
+        const shape = pickCloudShape(CLOUD_MIX[bandIndex], bandIndex === 2, previous);
+        previous = shape;
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
         svg.setAttribute('viewBox', shape.viewBox);
         svg.setAttribute('class', 'cloud');
+        // The tier picks which set of lighting tokens this cloud reads, so a
+        // cirrus at nine kilometres keeps its colour after the cumulus below
+        // it has gone dark.
+        svg.dataset.tier = cloudTier(shape.km);
+        // Which distance it sits at, and so what it passes in front of.
+        svg.dataset.band = String(bandIndex);
         use.setAttribute('href', shape.id);
+
+        // Half of them are mirrored, which doubles the apparent number of
+        // shapes for free. The flip has to live on the <use>, because the
+        // drift animation owns the transform on the <svg> itself.
+        if (Math.random() < 0.5) {
+          const [minX, , width] = shape.viewBox.split(/\s+/).map(Number);
+          use.setAttribute('transform', 'translate(' + (2 * minX + width) + ' 0) scale(-1 1)');
+        }
         svg.appendChild(use);
 
         const duration = rand(band.speed[0], band.speed[1]);
-        svg.style.width = rand(band.width[0], band.width[1]).toFixed(0) + 'px';
+        // A towering cumulus is as tall as it is wide, so it needs less width
+        // than a flat bar to take up the same amount of sky.
+        const bulk = shape.near ? 0.66 : 1;
+        svg.style.width = (rand(band.width[0], band.width[1]) * bulk).toFixed(0) + 'px';
         // Cirrus rides above the weather and thinner, so it is pinned to the
         // top of whatever band it lands in and dialled back.
-        const topRange = shape.high
+        const high = shape.family === 'cirrus';
+        const topRange = high
           ? [band.top[0], band.top[0] + (band.top[1] - band.top[0]) * 0.4]
           : band.top;
         svg.style.top = rand(topRange[0], topRange[1]).toFixed(2) + '%';
-        if (shape.high) svg.style.setProperty('--wisp', '0.62');
+        // A little jitter on every cloud, so even two of the same shape on the
+        // same band do not read as a matched pair.
+        svg.style.setProperty('--wisp', (high ? rand(0.5, 0.72) : rand(0.86, 1)).toFixed(2));
         svg.style.animationDuration = duration.toFixed(1) + 's';
         // Negative delays scatter them across the sky on first paint instead
         // of marching them all in from the left edge together.
         svg.style.animationDelay = (-Math.random() * duration).toFixed(1) + 's';
         svg.style.setProperty('--depth', band.depth.toFixed(2));
+        // The cover a sky needs before this particular cloud is in it. Sorting
+        // the reveal by threshold rather than rebuilding on every change means
+        // clouds arrive and leave one at a time, which is how a sky fills in.
+        svg.style.setProperty('--thresh', (i / band.count * 0.86 + Math.random() * 0.14).toFixed(3));
         frag.appendChild(svg);
       }
-    }
+    });
     els.clouds.replaceChildren(frag);
+    buildDeck();
+  }
+
+  // The lid itself is a soft band rather than more cloud shapes, because past
+  // about eight tenths of cover you stop being able to pick out individual
+  // clouds at all. A handful of very wide stratus sheets drift across it so it
+  // still reads as weather and not as a panel someone dropped over the sky.
+  function buildDeck() {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < 4; i++) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      svg.setAttribute('viewBox', '0 0 212 28');
+      svg.setAttribute('class', 'cloud cloud--deck');
+      use.setAttribute('href', '#art-cloud-12');
+      svg.appendChild(use);
+      const duration = rand(150, 230);
+      svg.style.width = rand(340, 560).toFixed(0) + 'px';
+      svg.style.top = (4 + i * 11 + rand(-3, 3)).toFixed(1) + '%';
+      svg.style.animationDuration = duration.toFixed(1) + 's';
+      svg.style.animationDelay = (-Math.random() * duration).toFixed(1) + 's';
+      svg.dataset.tier = '0';
+      frag.appendChild(svg);
+    }
+    els.deck.replaceChildren(frag);
+  }
+
+  // ---- Rain --------------------------------------------------------------
+  // A fixed pool of drops, revealed by intensity the same way the clouds are
+  // revealed by cover, so a shower builds and eases instead of switching on.
+  // Three depths: near drops are longer, faster and darker, which is most of
+  // what sells rain as having volume rather than being a texture.
+  const RAIN_DROPS = 90;
+
+  function buildRain() {
+    if (reduceMotion) return;
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < RAIN_DROPS; i++) {
+      const drop = document.createElement('span');
+      drop.className = 'drop';
+      const depth = Math.random();
+      drop.style.left = (Math.random() * 108 - 4).toFixed(2) + '%';
+      drop.style.setProperty('--len', (8 + depth * 26).toFixed(1) + 'px');
+      drop.style.setProperty('--fade', (0.16 + depth * 0.34).toFixed(2));
+      drop.style.setProperty('--thresh', (i / RAIN_DROPS).toFixed(3));
+      const fall = (1.35 - depth * 0.75).toFixed(2);
+      drop.style.animationDuration = fall + 's';
+      drop.style.animationDelay = (-Math.random() * fall).toFixed(2) + 's';
+      frag.appendChild(drop);
+    }
+    els.rain.replaceChildren(frag);
   }
 
   // ---- Meteors -----------------------------------------------------------
@@ -852,8 +1627,11 @@
     // the entry angle is drawn across a wide range rather than fixed.
     const angle = rand(18, 62) * (Math.random() < 0.5 ? 1 : -1);
     const length = rand(90, 260);
-    const travel = rand(360, 900);
-    const life = rand(0.55, 1.5);
+    const travel = rand(320, 760);
+    // A real meteor is gone in well under a second, which is true and useless:
+    // by the time your eye has found it there is nothing left to look at. This
+    // is roughly half the old speed, slow enough to actually follow one.
+    const life = rand(1.2, 2.8);
 
     const meteor = document.createElement('div');
     meteor.className = 'meteor';
@@ -1053,6 +1831,19 @@
       const busy = Math.random() < 0.34;
       const chance = busy ? rand(0.7, 0.95) : rand(0.05, 0.2);
 
+      // How late this floor keeps its lights on. --wake is the point on the
+      // city's own evening at which a window gives up: a low number means it
+      // burns until the small hours, a high one that it goes off with the news.
+      // A working floor keeps stranger hours than a flat does, so it draws from
+      // a wider spread and is likelier to hold a light all night.
+      const owlChance = busy ? 0.12 : 0.05;
+      const wakeFrom = busy ? 0.08 : 0.30;
+      const dress = (rect) => {
+        rect.style.setProperty('--wake', rand(wakeFrom, 1).toFixed(3));
+        // Stairwells, corridors, server rooms, the lamp nobody turns off.
+        if (Math.random() < owlChance) rect.style.setProperty('--owl', '1');
+      };
+
       if (spec.style === 'ribbon') {
         // Continuous glazing: one band per floor, occasionally interrupted.
         let cx = x + inset + padX;
@@ -1061,6 +1852,7 @@
           if (Math.random() < chance) {
             const bar = el('rect', { x: cx, y: wy, width: runLen - 2.5, height: spec.winH, rx: 0.8 });
             bar.style.setProperty('--lit', rand(0.4, 1).toFixed(2));
+            dress(bar);
             windows.appendChild(bar);
           }
           cx += runLen;
@@ -1076,6 +1868,7 @@
             rx: 0.8,
           });
           win.style.setProperty('--lit', rand(0.45, 1).toFixed(2));
+          dress(win);
           windows.appendChild(win);
         }
       }
@@ -1232,7 +2025,7 @@
   }
 
   // Hard ceilings, so no combination of timing accidents can fill the sky.
-  const MAX_BIRDS = 26;
+  const MAX_BIRDS = 40;
   const MAX_PLANES = 4;
 
   function isDaylightNow() {
@@ -1307,29 +2100,39 @@
 
   // Gulls do not all travel the same way, so neither do these. A lone bird
   // crossing high, a pair, a loose skein, or a far-off flock in a ragged V.
+  // How many there are and how far off they are is not independent: you notice
+  // one bird when it is near, and a big flock only reads as a flock at a
+  // distance, so the size of a group and the band it flies on go together.
   const FLOCKS = [
-    { kind: 'single', size: [1, 1], scale: [0.85, 1.25], top: [6, 46], weight: 4 },
-    { kind: 'pair', size: [2, 2], scale: [0.7, 1.0], top: [8, 44], weight: 3 },
-    { kind: 'skein', size: [3, 6], scale: [0.55, 0.9], top: [6, 40], weight: 4 },
-    { kind: 'flock', size: [10, 18], scale: [0.24, 0.42], top: [4, 26], weight: 2 },
+    { kind: 'single', size: [1, 1], band: 2, weight: 4 },
+    { kind: 'pair', size: [2, 2], band: 2, weight: 2 },
+    { kind: 'pair', size: [2, 2], band: 1, weight: 2 },
+    { kind: 'skein', size: [3, 6], band: 1, weight: 4 },
+    { kind: 'skein', size: [3, 5], band: 0, weight: 2 },
+    { kind: 'flock', size: [10, 18], band: 0, weight: 2 },
   ];
 
   function spawnFlock() {
     if (countFlyers('.bird') >= MAX_BIRDS) return;
 
     const shape = pickWeighted(FLOCKS);
+    const band = SKY_BANDS[shape.band];
     const size = Math.round(rand(shape.size[0], shape.size[1]));
-    const baseTop = rand(shape.top[0], shape.top[1]);
-    const baseScale = rand(shape.scale[0], shape.scale[1]);
-    const baseDur = rand(22, 36);
-    const drift = rand(-90, 30);
+    const baseTop = rand(band.bird.top[0], band.bird.top[1]);
+    const baseScale = rand(band.bird.scale[0], band.bird.scale[1]);
+    // The whole group holds formation, so it shares one crossing time, and the
+    // far band takes the longest over it the way the far clouds do.
+    const baseDur = rand(band.bird.cross[0], band.bird.cross[1]);
+    const drift = rand(-90, 30) * band.depth;
 
     for (let i = 0; i < size; i++) {
       if (countFlyers('.bird') >= MAX_BIRDS) break;
 
       // Individuals vary around the group's size rather than being identical.
-      const scale = clamp(baseScale * rand(0.86, 1.14), 0.2, 1.35);
+      const scale = clamp(baseScale * rand(0.86, 1.14), 0.18, 1.35);
       const bird = makeBird(scale);
+      bird.dataset.band = String(shape.band);
+      bird.style.setProperty('--depth', band.depth.toFixed(2));
 
       let offsetX, offsetY;
       if (shape.kind === 'flock') {
@@ -1346,11 +2149,13 @@
         offsetY = rand(-3, 3);
       }
 
-      bird.style.marginLeft = offsetX.toFixed(0) + 'px';
+      // Spacing is in pixels on screen, so it has to shrink with distance or a
+      // far flock comes out strung across the whole sky.
+      bird.style.marginLeft = (offsetX * baseScale).toFixed(0) + 'px';
       bird.style.top = clamp(baseTop + offsetY, 2, 56).toFixed(2) + '%';
 
       // The whole group holds formation, so it shares one crossing time.
-      launch(bird, (baseDur / Math.max(0.5, baseScale)).toFixed(1), drift + rand(-8, 8));
+      launch(bird, baseDur.toFixed(1), drift + rand(-8, 8));
     }
   }
 
@@ -1405,6 +2210,10 @@
 
     const plane = document.createElement('div');
     plane.className = 'flyer plane plane--' + kind.type + (night ? ' is-night' : '');
+    // An airliner at cruise is above all of this, so every cloud nearer than
+    // the far band crosses in front of it. That reads as height rather than as
+    // the plane being tucked behind something.
+    plane.dataset.band = '0';
     // Roughly a third of the traffic is heading the other way.
     if (Math.random() < 0.38) plane.classList.add('is-westbound');
 
@@ -1435,7 +2244,9 @@
   }
 
   function trafficAllowed() {
-    return sceneActive() && !document.hidden;
+    // Birds do not fly through a downpour, and you cannot see much through
+    // thick fog either.
+    return sceneActive() && !document.hidden && weather.rain < 0.5 && weather.fog < 0.6;
   }
 
   // Birds roost after dark, so the night sky belongs to the aircraft.
@@ -1444,7 +2255,7 @@
     birdTimeout = setTimeout(() => {
       if (trafficAllowed() && !isNightScene()) spawnFlock();
       // A long wait when nothing will be spawned anyway keeps timers cheap.
-      scheduleBirds(isNightScene() ? rand(40000, 70000) : rand(9000, 22000));
+      scheduleBirds(isNightScene() ? rand(40000, 70000) : rand(6000, 15000));
     }, delay);
   }
 
@@ -2189,6 +3000,68 @@
     return `Sunrise ${asClock(sunrise)}, sunset ${asClock(sunset)}.`;
   }
 
+  // A sky with nothing in it is a fair reading of a clear forecast, but from
+  // the outside it is indistinguishable from something being broken. So the
+  // panel says what was read, for which point, and from where it came.
+  function describeWeatherReading() {
+    const w = weather;
+    const grid = forecastGrid();
+    const where = Math.abs(grid.lat).toFixed(1) + (grid.lat >= 0 ? 'N' : 'S') + ' '
+                + Math.abs(grid.lon).toFixed(1) + (grid.lon >= 0 ? 'E' : 'W');
+
+    if (w.source !== 'forecast' || !w.reading) {
+      return 'No forecast reached this device, so the sky is generated from the date and '
+           + where + '. It will not match what is outside your window.';
+    }
+
+    const r = w.reading;
+    const pct = (v) => Math.round(v) + '%';
+    const parts = ['Open-Meteo for ' + where + ', to the nearest tenth of a degree.'];
+    parts.push('Cloud ' + pct(r.all) + ': ' + pct(r.low) + ' low, ' + pct(r.mid) + ' middle, '
+             + pct(r.high) + ' high.');
+    if (r.precipitation >= 0.05) parts.push('Rain ' + r.precipitation.toFixed(1) + ' mm an hour.');
+    parts.push('Visibility ' + (r.visibility >= 1000
+      ? Math.round(r.visibility / 1000) + ' km.' : Math.round(r.visibility) + ' m.'));
+    if (r.all < 10 && !alwaysCloudy) {
+      parts.push('That is a clear sky, which is why there are no clouds in it. '
+               + 'Always cloudy overrides that.');
+    }
+    if (!place.exact) parts.push('Position is estimated from your time zone; sharing your location will sharpen it.');
+    return parts.join(' ');
+  }
+
+  let lastWeatherNote = '';
+
+  function renderWeatherNote() {
+    const text = describeWeatherReading();
+    if (text === lastWeatherNote) return;
+    lastWeatherNote = text;
+    if (weatherEls.note) weatherEls.note.textContent = text;
+  }
+
+  const weatherEls = {
+    btn: document.getElementById('cloudToggle'),
+    label: document.getElementById('cloudToggleLabel'),
+    note: document.getElementById('weatherNote'),
+  };
+
+  function renderClouds() {
+    if (!weatherEls.btn) return;
+    weatherEls.btn.setAttribute('aria-pressed', String(alwaysCloudy));
+    weatherEls.label.textContent = alwaysCloudy ? 'Always cloudy' : 'Follow the forecast';
+  }
+
+  if (weatherEls.btn) {
+    weatherEls.btn.addEventListener('click', () => {
+      alwaysCloudy = !alwaysCloudy;
+      try { localStorage.setItem(CLOUDS_KEY, alwaysCloudy ? 'always' : 'weather'); }
+      catch (e) { /* no persistence */ }
+      renderClouds();
+      lastWeatherNote = '';
+      tick();
+    });
+  }
+
   function renderLocation() {
     locationEls.btn.setAttribute('aria-pressed', String(place.exact));
     locationEls.label.textContent = place.exact ? 'Using your location' : 'Use my location';
@@ -2219,6 +3092,7 @@
           try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ lat: place.lat, lon: place.lon })); }
           catch (e) { /* continue without persistence */ }
           solarCache = { key: '', value: null };
+          lastWeatherNote = '';
           renderLocation();
           tick();
         },
@@ -2236,21 +3110,45 @@
   const COMPACT_KEY = 'homeStretch.compact';
   const compactBtn = document.getElementById('compactToggle');
 
-  let compact = false;
-  try { compact = localStorage.getItem(COMPACT_KEY) === 'on'; } catch (e) { /* default open */ }
+  // Three sizes rather than two. The whole card, then the number and its bar,
+  // then a pill at the top of the screen: small enough and far enough out of
+  // the middle that the sky underneath is the thing you are looking at.
+  const CARD_SIZES = ['full', 'compact', 'pill'];
+  const SIZE_LABEL = {
+    full: 'Shrink the card',
+    compact: 'Shrink to a pill',
+    pill: 'Bring the card back',
+  };
 
-  function setCompact(on, persist) {
-    compact = on;
-    els.card.classList.toggle('is-compact', on);
-    compactBtn.setAttribute('aria-pressed', String(on));
-    compactBtn.setAttribute('aria-label', on ? 'Expand the card' : 'Shrink the card');
+  let cardSize = 'full';
+  try {
+    const saved = localStorage.getItem(COMPACT_KEY);
+    // 'on' and 'off' are what the two-size version wrote, so anyone who had it
+    // shrunk stays shrunk rather than being expanded out from under them.
+    cardSize = saved === 'on' ? 'compact'
+      : CARD_SIZES.indexOf(saved) >= 0 ? saved : 'full';
+  } catch (e) { /* default open */ }
+
+  function setCardSize(size, persist) {
+    cardSize = CARD_SIZES.indexOf(size) >= 0 ? size : 'full';
+    els.card.classList.toggle('is-compact', cardSize === 'compact');
+    els.card.classList.toggle('is-pill', cardSize === 'pill');
+    compactBtn.setAttribute('aria-pressed', String(cardSize !== 'full'));
+    compactBtn.setAttribute('aria-label', SIZE_LABEL[cardSize]);
     if (persist !== false) {
-      try { localStorage.setItem(COMPACT_KEY, on ? 'on' : 'off'); }
+      try { localStorage.setItem(COMPACT_KEY, cardSize); }
       catch (e) { /* continue without persistence */ }
     }
   }
 
-  compactBtn.addEventListener('click', () => setCompact(!compact));
+  // One control for all three, so it is always the same button in the same
+  // place. From the pill it goes back to the whole card rather than stepping
+  // back through compact, because that is what you want after watching the sky.
+  function cycleCardSize() {
+    setCardSize(CARD_SIZES[(CARD_SIZES.indexOf(cardSize) + 1) % CARD_SIZES.length]);
+  }
+
+  compactBtn.addEventListener('click', cycleCardSize);
 
   // ---- Settings panel --------------------------------------------------
   // Settings is a floating dialog over a backdrop, not content inside the
@@ -2329,7 +3227,7 @@
       case 'a': setTheme('amoled'); break;
       case 'h': setFormat(timeFormat === '12' ? '24' : '12'); break;
       case 's': setSettingsOpen(settingsEls.panel.hidden); break;
-      case 'm': setCompact(!compact); break;
+      case 'm': cycleCardSize(); break;
       default: return;
     }
     e.preventDefault();
@@ -2423,6 +3321,10 @@
     els.root.style.setProperty('--accent', workColors.accent);
 
     // Sky: work-progress driven (dark), flat black (AMOLED), or real time of day (light)
+    // Weather first: the sky, the clouds and the city all read it below.
+    refreshForecast();
+    weather = weatherAt(now);
+
     const eclipseDepth = updateEclipse();
     // A deep solar eclipse is not just darker daylight, it looks like dusk.
     // Feeding the coverage back into the sun's altitude walks the sky down its
@@ -2439,8 +3341,9 @@
       els.moon.style.opacity = 0;
     } else {
       updateCelestial(now, sky.night);
-      updateClouds(sky.ambient ?? 1);
-      updateSkyline(sky.ambient ?? 1, sky.stars ?? 0);
+      updateWeather(sky);
+      updateClouds(sky);
+      updateSkyline(sky);
     }
 
     // The first stretch past your hours reads as a win; after that it does not.
@@ -2471,16 +3374,20 @@
     });
   }
 
+  loadForecast();
+  scheduleStir();
   buildStarfield();
   buildClouds();
+  buildRain();
   buildSkyline();
-  setCompact(compact, false);
+  setCardSize(cardSize, false);
   renderWeekdays();
   renderHoursMode();
   renderLunchToggle();
   renderRemind();
   renderChime();
   renderLocation();
+  renderClouds();
   setFormat(timeFormat);
   setTheme(theme);
   showTidbit(false);
@@ -2488,5 +3395,9 @@
   try { tidbitsOn = localStorage.getItem(TIDBIT_KEY) !== 'off'; } catch (e) { /* default to on */ }
   setTidbitsVisible(tidbitsOn);
   tick();
+  // The first tick has now put real light on the clouds. Only after that is
+  // the colour cross-fade armed, so a page opened at midnight does not spend
+  // its first second fading a noon sky out.
+  requestAnimationFrame(() => els.root.classList.add('clouds-lit'));
   setInterval(tick, 1000);
 })();
