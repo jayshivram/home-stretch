@@ -319,6 +319,45 @@ body{
   display: block;
 }
 
+/* The cloud art shades itself with tokens rather than the saturated cyan it
+   shipped with, which read as blue slabs pasted on the sky instead of shadow.
+   The values come from the lighting model in script.js, which follows the
+   sunlight to each cloud rather than picking from a ramp: --body is the face
+   the light lands on, --shade the face lit only by the sky, --deep the
+   underside. Which of those is the bright one flips over the course of a day,
+   because at sunset the light arrives from below.
+
+   Nine tokens, three per altitude tier, because a cirrus at nine kilometres
+   holds its sunlight for minutes after the cumulus beneath it has gone dark
+   and cannot share a colour with it. Registering them as <color> is what lets
+   the sky cross-fade instead of stepping. */
+@property --cloud-body-0{ syntax: "<color>"; inherits: true; initial-value: #f4f5f3; }
+@property --cloud-body-1{ syntax: "<color>"; inherits: true; initial-value: #f4f5f3; }
+@property --cloud-body-2{ syntax: "<color>"; inherits: true; initial-value: #f4f5f3; }
+@property --cloud-shade-0{ syntax: "<color>"; inherits: true; initial-value: #d8e6f0; }
+@property --cloud-shade-1{ syntax: "<color>"; inherits: true; initial-value: #d8e6f0; }
+@property --cloud-shade-2{ syntax: "<color>"; inherits: true; initial-value: #d8e6f0; }
+@property --cloud-deep-0{ syntax: "<color>"; inherits: true; initial-value: #c3cfd8; }
+@property --cloud-deep-1{ syntax: "<color>"; inherits: true; initial-value: #c3cfd8; }
+@property --cloud-deep-2{ syntax: "<color>"; inherits: true; initial-value: #c3cfd8; }
+
+/* On the root, not on the cloud layer: the overcast deck is a sibling of the
+   clouds and has to read the same light. */
+:root{
+  --cloud-body-0: #f4f5f3; --cloud-shade-0: #d8e6f0; --cloud-deep-0: #c3cfd8;
+  --cloud-body-1: #f4f5f3; --cloud-shade-1: #d8e6f0; --cloud-deep-1: #c3cfd8;
+  --cloud-body-2: #f4f5f3; --cloud-shade-2: #d8e6f0; --cloud-deep-2: #c3cfd8;
+}
+
+/* Armed by the script once the first real sky has been computed, so opening
+   the page at night does not start by fading a daytime sky out. */
+:root.clouds-lit{
+  transition:
+    --cloud-body-0 1.6s ease, --cloud-shade-0 1.6s ease, --cloud-deep-0 1.6s ease,
+    --cloud-body-1 1.6s ease, --cloud-shade-1 1.6s ease, --cloud-deep-1 1.6s ease,
+    --cloud-body-2 1.6s ease, --cloud-shade-2 1.6s ease, --cloud-deep-2 1.6s ease;
+}
+
 /* --depth is set per cloud by the generator: distant bands sit fainter and
    flatter, near bands read solid. Depth drives opacity so the parallax is
    atmospheric, not just a difference in speed. */
@@ -326,18 +365,132 @@ body{
   position: absolute;
   left: -340px;
   height: auto;
-  opacity: calc(var(--cloud-opacity, 0.85) * var(--depth, 1) * var(--wisp, 1));
-  filter: brightness(var(--cloud-brightness, 1));
-  transition: opacity 1.6s ease, filter 1.6s ease;
+  /* Low cloud unless the generator says otherwise. */
+  --cloud-body: var(--cloud-body-0);
+  --cloud-shade: var(--cloud-shade-0);
+  --cloud-shade-deep: var(--cloud-deep-0);
+  /* Cover decides how much of the sky has cloud in it. Each cloud carries the
+     cover it needs before it belongs, so a filling sky gains them one at a
+     time; --under-deck then takes them away again as the lid closes, because
+     by then they are inside it and there is nothing to see. */
+  opacity: calc(
+    var(--cloud-opacity, 0.85) * var(--depth, 1) * var(--wisp, 1)
+    * clamp(0, (var(--cover, var(--cover-0, 1)) - var(--thresh, 0)) * 7, 1)
+    * var(--under-deck, 1));
+  transition: opacity 1.6s ease;
   animation-name: drift;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   will-change: transform;
 }
 
+.cloud[data-tier="1"]{
+  --cloud-body: var(--cloud-body-1);
+  --cloud-shade: var(--cloud-shade-1);
+  --cloud-shade-deep: var(--cloud-deep-1);
+  --cover: var(--cover-1, 1);
+}
+.cloud[data-tier="2"]{
+  --cloud-body: var(--cloud-body-2);
+  --cloud-shade: var(--cloud-shade-2);
+  --cloud-shade-deep: var(--cloud-deep-2);
+  --cover: var(--cover-2, 1);
+}
+
 @keyframes drift{
   from{ transform: translateX(0); }
   to{ transform: translateX(calc(100vw + 680px)); }
+}
+
+/* ---------------------------------------
+   Weather: the lid, the rain and the air
+--------------------------------------- */
+
+/* An overcast deck seen from underneath is darker overhead than it is towards
+   the horizon, because straight up you are looking through the most of it.
+   Its colours are the low-cloud tokens, so the lid is lit by the same model as
+   everything else and greys out at dusk on its own. */
+.sky__deck{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 64%;
+  display: none;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(180deg,
+    var(--cloud-shade-0) 0%,
+    var(--cloud-deep-0) 22%,
+    var(--cloud-shade-0) 62%,
+    var(--cloud-body-0) 100%);
+  opacity: calc(var(--overcast, 0) * 0.97);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0) 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 58%, rgba(0,0,0,0) 100%);
+  transition: opacity 2.4s ease;
+}
+:root:not([data-theme="amoled"]) .sky__deck{ display: block; }
+
+/* Sheets drifting inside the lid, so it is weather rather than a panel. */
+.cloud--deck{
+  opacity: 0.5;
+  left: -560px;
+}
+
+/* Rain is only ever built once; intensity reveals more of the same drops. */
+.sky__rain{
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  display: none;
+}
+:root:not([data-theme="amoled"]) .sky__rain.is-falling{ display: block; }
+
+.drop{
+  position: absolute;
+  top: 0;
+  width: 1.4px;
+  height: var(--len, 16px);
+  border-radius: 1px;
+  background: linear-gradient(180deg,
+    rgba(206, 222, 238, 0) 0%,
+    rgba(206, 222, 238, 0.85) 55%,
+    rgba(226, 238, 250, 0.95) 100%);
+  opacity: calc(var(--fade, 0.3) * clamp(0, (var(--rain, 0) - var(--thresh, 0)) * 3, 1));
+  animation-name: rainfall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+/* Rain does not fall straight down; the slant is the wind in it. */
+@keyframes rainfall{
+  from{ transform: translate3d(0, -14vh, 0) rotate(9deg); }
+  to{ transform: translate3d(3.5vh, 114vh, 0) rotate(9deg); }
+}
+
+/* Fog is the air itself, so it sits in front of the city rather than behind
+   it, and it is thickest at the ground where the cold air pools. Masked
+   instead of faded to a transparent stop, which keeps the top edge from
+   fringing grey. */
+.sky__fog{
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  background: var(--fog-color, #d6dae0);
+  opacity: calc(var(--fog, 0) * 0.94);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0) 4%, rgba(0,0,0,0.5) 46%, #000 86%);
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0) 4%, rgba(0,0,0,0.5) 46%, #000 86%);
+  transition: opacity 2.4s ease, background-color 2.4s ease;
+}
+:root:not([data-theme="amoled"]) .sky__fog{ display: block; }
+
+/* The disc goes soft before it goes out. */
+.sun, .moon{
+  filter: blur(var(--sky-blur, 0px));
+  transition: filter 2s ease;
 }
 
 /* ---------------------------------------
@@ -380,14 +533,28 @@ body{
   transition: fill 1.6s ease;
 }
 
-/* Windows are dark by day and glow at night, at a strength set per window. */
+/* Windows are dark by day and glow at night, at a strength set per window.
+   --window-glow says whether it is dark enough to have a light on at all;
+   --city-awake says how much of the city still does. Each window carries the
+   hour it gives up at, so a falling --city-awake crosses those thresholds a
+   couple at a time and the skyline empties unevenly. An --owl never gives up:
+   without a few of those the city would go black, and a black city is not a
+   city. The occupancy is factored out into --window-on so the three distance
+   bands stay one expression rather than three copies of it. */
 .skyline__windows rect{
   fill: var(--window-color, #ffd489);
-  opacity: calc(var(--lit, 0.6) * var(--window-glow, 0));
+  --window-on: max(
+    var(--owl, 0),
+    clamp(0, (var(--city-awake, 1) - var(--wake, 0.5)) * 8, 1));
+  opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * var(--window-on));
   transition: opacity 2.2s ease;
 }
-.skyline__far .skyline__windows rect{ opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * 0.4); }
-.skyline__mid .skyline__windows rect{ opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * 0.7); }
+.skyline__far .skyline__windows rect{
+  opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * var(--window-on) * 0.4);
+}
+.skyline__mid .skyline__windows rect{
+  opacity: calc(var(--lit, 0.6) * var(--window-glow, 0) * var(--window-on) * 0.7);
+}
 
 /* Red aircraft-warning lights on the masts, which only matter after dark. */
 .skyline__beacon{
@@ -422,6 +589,24 @@ body{
   will-change: transform;
 }
 
+/* The order of the sky, back to front. Clouds and birds are interleaved by
+   band rather than stacked as two whole layers, which is the only way a bird
+   can pass behind the cloud in front of it and in front of the one behind it.
+   Everything else in the scene is pinned to the same ladder, because a single
+   z-index anywhere in here would otherwise jump the whole lot. */
+.sky__stars{ z-index: 1; }
+.sun, .moon{ z-index: 2; }
+.cloud[data-band="0"]{ z-index: 3; }
+.flyer[data-band="0"]{ z-index: 4; }
+.cloud[data-band="1"]{ z-index: 5; }
+.flyer[data-band="1"]{ z-index: 6; }
+.cloud[data-band="2"]{ z-index: 7; }
+.flyer[data-band="2"]{ z-index: 8; }
+.sky__deck{ z-index: 9; }
+.skyline{ z-index: 10; }
+.sky__fog{ z-index: 11; }
+.sky__rain{ z-index: 12; }
+
 /* Four wing poses stacked, each lit for a quarter of the beat. Hard cuts
    between drawn frames read as flight; scaling one silhouette reads as a
    rubber band. The whole bird also rises and falls on the beat. */
@@ -437,7 +622,13 @@ body{
   width: 100%;
   height: auto;
   display: block;
-  fill: rgba(24, 30, 44, var(--bird-ink, 0.62));
+  /* Distance is haze as well as size, but a bird cannot take the same amount
+     of it as a cloud. A cloud is big and pale and survives being dropped to
+     half opacity; a bird is a dark mark a dozen pixels across, and at that
+     size contrast is the only thing holding it together, so fading it by
+     distance erases it rather than pushing it back. Size does most of the
+     work of depth here and haze only trims the contrast. */
+  fill: rgba(24, 30, 44, calc(var(--bird-ink, 0.62) * (0.75 + 0.25 * var(--depth, 1))));
   animation: flap-frame var(--flap, 0.7s) steps(1, end) infinite;
 }
 /* Frames after the first stack on top of the one that establishes height. */
@@ -707,8 +898,10 @@ body{
 --------------------------------------- */
 /* Only one of the two glyphs is ever shown, so the single button reads as
    shrink when open and grow when compact. */
-.card:not(.is-compact) .icon-grow,
-.card.is-compact .icon-shrink{ display: none; }
+/* The button shrinks all the way down and then restores, so the grow icon
+   only belongs on the smallest size. */
+.card:not(.is-pill) .icon-grow,
+.card.is-pill .icon-shrink{ display: none; }
 
 .card.is-compact{
   max-width: 300px;
@@ -742,6 +935,67 @@ body{
 .card.is-compact .progress-track{
   height: 4px;
   margin-bottom: 0;
+}
+
+/* The smallest size: everything gone except the number and how far along it
+   is, parked at the top of the screen. Fixed rather than centred, because the
+   whole point of it is to leave the middle of the sky alone. It stays under
+   the settings backdrop at z-index 40, so opening the panel still covers it. */
+.card.is-pill{
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: auto;
+  max-width: min(92vw, 420px);
+  padding: 7px 10px 9px 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  text-align: left;
+}
+
+.card.is-pill .journey,
+.card.is-pill .status,
+.card.is-pill .week,
+.card.is-pill .schedule-summary,
+.card.is-pill .tidbit,
+.card.is-pill .tidbit-show,
+.card.is-pill .timer-label,
+.card.is-pill .eyebrow{
+  display: none;
+}
+
+/* The number leads and the controls follow it, which is the opposite of the
+   full card, so both are placed explicitly rather than left to source order. */
+.card.is-pill .timer{
+  order: 1;
+  font-size: 20px;
+  line-height: 1;
+  margin: 0;
+  white-space: nowrap;
+}
+.card.is-pill .eyebrow-row{
+  order: 2;
+  margin: 0;
+  gap: 2px;
+}
+.card.is-pill .icon-btn{ width: 24px; height: 24px; }
+.card.is-pill .icon-btn svg{ width: 13px; height: 13px; }
+
+/* The progress bar stops being a row in a stack and becomes the pill's own
+   bottom edge. */
+.card.is-pill .progress-track{
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  margin: 0;
+  border-radius: 0;
 }
 
 /* ---------------------------------------
@@ -1546,10 +1800,13 @@ body{
 --------------------------------------- */
 @media (prefers-reduced-motion: reduce){
   .journey__fill, .progress-fill, .sky, .sky__stars, .journey__traveler,
-  .sun, .moon, .card{
+  .sky__deck, .sky__fog, .sun, .moon, .card{
     transition: none;
   }
-  .cloud, .flyer, .bird__frame, .bird__flap, .sun use, .journey__halo,
+  :root.clouds-lit{ transition: none; }
+  /* Rain is built only when motion is allowed, but make sure of it here. */
+  .sky__rain{ display: none !important; }
+  .cloud, .drop, .flyer, .bird__frame, .bird__flap, .sun use, .journey__halo,
   .starfield, .star,
   .plane__lights .red, .plane__lights .green, .plane__lights .strobe,
   .card.is-home .journey__marker--end,
